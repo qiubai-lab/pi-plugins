@@ -24,6 +24,13 @@ export interface DoctorReport {
   orphanSnapshots: string[];
 }
 
+export interface MarketplaceSummary {
+  source: MarketplaceSourceState;
+  pluginCount: number;
+  skillCount: number;
+  enabledCount: number;
+}
+
 function selector(plugin: string, marketplace: string): string {
   return `${plugin}@${marketplace}`;
 }
@@ -65,6 +72,21 @@ export class MarketplaceService {
     return Object.values((await this.store.load()).sources).sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  async marketplaceSummaries(): Promise<MarketplaceSummary[]> {
+    const state = await this.store.load();
+    const summaries: MarketplaceSummary[] = [];
+    for (const source of Object.values(state.sources).sort((a, b) => a.name.localeCompare(b.name))) {
+      const catalog = await this.catalogFor(state, source.name);
+      summaries.push({
+        source,
+        pluginCount: catalog.plugins.length,
+        skillCount: catalog.plugins.reduce((sum, plugin) => sum + plugin.skillNames.length, 0),
+        enabledCount: state.enabled.filter(value => value.endsWith(`@${source.name}`)).length,
+      });
+    }
+    return summaries;
+  }
+
   async listPlugins(marketplace: string): Promise<{ plugin: ManagedPlugin; enabled: boolean }[]> {
     const state = await this.store.load();
     const catalog = await this.catalogFor(state, marketplace);
@@ -72,13 +94,15 @@ export class MarketplaceService {
     return catalog.plugins.map(plugin => ({ plugin, enabled: enabled.has(selector(plugin.name, marketplace)) }));
   }
 
-  private async materialize(remote: string, ref: string): Promise<{ path: string; commit: string; catalog: ManagedCatalog }> {
+  private async materialize(remote: string, ref: string | undefined, signal?: AbortSignal): Promise<{ path: string; commit: string; ref: string; catalog: ManagedCatalog }> {
     await mkdir(this.store.snapshotsRoot, { recursive: true, mode: 0o700 });
     const path = join(this.store.snapshotsRoot, `.tmp-${randomUUID()}`);
-    const commit = await this.git.materialize(remote, ref, path);
+    const snapshot = await this.git.materialize(remote, ref, path, signal);
     try {
+      signal?.throwIfAborted();
       const catalog = await loadManagedCatalog(path, this.limits);
-      return { path, commit, catalog };
+      signal?.throwIfAborted();
+      return { path, commit: snapshot.commit, ref: snapshot.ref, catalog };
     } catch (error) {
       await rm(path, { recursive: true, force: true });
       throw error;
@@ -89,20 +113,22 @@ export class MarketplaceService {
     return `${marketplace}-${commit.slice(0, 12)}-${randomUUID().slice(0, 8)}`;
   }
 
-  async addSource(remote: string, ref: string): Promise<MarketplaceSourceState> {
-    const candidate = await this.materialize(remote, ref);
+  async addSource(remote: string, ref?: string, signal?: AbortSignal): Promise<MarketplaceSourceState> {
+    const candidate = await this.materialize(remote, ref, signal);
     let finalPath: string | undefined;
     try {
+      signal?.throwIfAborted();
       const state = await this.store.load();
       if (state.sources[candidate.catalog.name]) throw new Error(`Marketplace already exists: ${candidate.catalog.name}`);
       const snapshot = this.finalSnapshotName(candidate.catalog.name, candidate.commit);
       finalPath = join(this.store.snapshotsRoot, snapshot);
       await rename(candidate.path, finalPath);
+      signal?.throwIfAborted();
       const source: MarketplaceSourceState = {
         name: candidate.catalog.name,
         displayName: candidate.catalog.displayName,
         remote,
-        ref,
+        ref: candidate.ref,
         commit: candidate.commit,
         snapshot,
       };
@@ -115,12 +141,12 @@ export class MarketplaceService {
     }
   }
 
-  async stageUpdate(marketplace: string, ref?: string): Promise<UpdateCandidate> {
+  async stageUpdate(marketplace: string, ref?: string, signal?: AbortSignal): Promise<UpdateCandidate> {
     const state = await this.store.load();
     const source = state.sources[marketplace];
     if (!source) throw new Error(`Unknown marketplace: ${marketplace}`);
     const nextRef = ref ?? source.ref;
-    const candidate = await this.materialize(source.remote, nextRef);
+    const candidate = await this.materialize(source.remote, nextRef, signal);
     if (candidate.catalog.name !== marketplace) {
       await rm(candidate.path, { recursive: true, force: true });
       throw new Error(`Updated marketplace changed identity from ${marketplace} to ${candidate.catalog.name}`);
@@ -129,7 +155,7 @@ export class MarketplaceService {
       sourceName: marketplace,
       oldCommit: source.commit,
       newCommit: candidate.commit,
-      ref: nextRef,
+      ref: candidate.ref,
       temporaryPath: candidate.path,
       catalog: candidate.catalog,
     };
@@ -164,7 +190,7 @@ export class MarketplaceService {
       if (!plugin || plugin.installation === "NOT_AVAILABLE") continue;
       for (const skillName of plugin.skillNames) {
         const owner = owners.get(skillName);
-        if (owner) throw new Error(`Skill name collision after update: ${skillName} is enabled by ${owner} and ${enabledSelector}`);
+        if (owner) throw new Error(`Skill name collision: ${skillName} is enabled by ${owner} and ${enabledSelector}`);
         owners.set(skillName, enabledSelector);
       }
     }
@@ -259,6 +285,28 @@ export class MarketplaceService {
     const state = await this.store.load();
     state.enabled = state.enabled.filter(item => item !== value);
     await this.store.save(state);
+  }
+
+  async setEnabledPlugins(marketplace: string, pluginNames: Iterable<string>): Promise<boolean> {
+    const state = await this.store.load();
+    const catalog = await this.catalogFor(state, marketplace);
+    const desired = new Set(pluginNames);
+    for (const pluginName of desired) {
+      const plugin = catalog.plugins.find(item => item.name === pluginName);
+      if (!plugin) throw new Error(`Unknown plugin: ${pluginName}@${marketplace}`);
+      if (plugin.installation === "NOT_AVAILABLE") throw new Error(`Plugin is not available: ${pluginName}@${marketplace}`);
+    }
+    const nextEnabled = [
+      ...state.enabled.filter(value => !value.endsWith(`@${marketplace}`)),
+      ...[...desired].map(pluginName => selector(pluginName, marketplace)),
+    ].sort();
+    const changed = nextEnabled.length !== state.enabled.length
+      || nextEnabled.some((value, index) => value !== state.enabled[index]);
+    if (!changed) return false;
+    const nextState: MarketplaceLoaderState = { ...state, enabled: nextEnabled };
+    await this.assertEnabledSkillsRemainUnique(nextState);
+    await this.store.save(nextState);
+    return true;
   }
 
   async discoverSkillPaths(): Promise<string[]> {

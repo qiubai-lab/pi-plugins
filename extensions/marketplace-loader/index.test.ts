@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerMarketplaceLoader } from "./index.ts";
 import type { MarketplaceService } from "./service.ts";
@@ -50,7 +50,7 @@ function fakeService() {
       return [{ plugin: { name: "alpha", skillNames: ["alpha-skill"], unsupportedCapabilities: ["mcp"] }, enabled: false }];
     },
     async doctor() { calls.push("doctor"); return { sources: 1, plugins: 1, skills: 1, enabled: 0, staleSelections: [], orphanSnapshots: [] }; },
-    async addSource(remote: string, ref: string) { calls.push(`add:${remote}:${ref}`); return { name: "fixture-market", commit: "a".repeat(40) }; },
+    async addSource(remote: string, ref?: string) { calls.push(`add:${remote}:${ref ?? ""}`); return { name: "fixture-market", ref: ref ?? "main", commit: "a".repeat(40) }; },
     async stageUpdate(name: string, ref?: string) { calls.push(`stage:${name}:${ref ?? ""}`); return candidate; },
     async discardUpdate() { calls.push("discard"); },
     async activateUpdate() { calls.push("activate"); return { name: "fixture-market", commit: "b".repeat(40) }; },
@@ -62,6 +62,23 @@ function fakeService() {
 }
 
 describe("marketplace loader Pi adapter", () => {
+  it("registers /plugins, opens its manager in TUI, and rejects non-TUI use", async () => {
+    const pi = fakePi();
+    const service = fakeService();
+    const manager = vi.fn(async () => undefined);
+    registerMarketplaceLoader(pi.api, { service: service as unknown as MarketplaceService, manager });
+    const ctx = fakeContext();
+    Object.assign(ctx, { mode: "rpc" });
+    await pi.commands.get("plugins")!.handler("", ctx);
+    expect(ctx.notifications.at(-1)).toEqual(expect.objectContaining({ level: "error" }));
+    expect(ctx.notifications.at(-1)?.message).toContain("仅支持 TUI 模式");
+    expect(manager).not.toHaveBeenCalled();
+
+    Object.assign(ctx, { mode: "tui" });
+    await pi.commands.get("plugins")!.handler("", ctx);
+    expect(manager).toHaveBeenCalledWith(ctx, service);
+  });
+
   it("registers discovery and fails closed on discovery errors", async () => {
     const pi = fakePi();
     const service = fakeService();
@@ -83,7 +100,7 @@ describe("marketplace loader Pi adapter", () => {
     const ctx = fakeContext();
     for (const command of ["help", "list", "plugins fixture-market", "doctor"]) await handler(command, ctx);
     expect(service.calls).toEqual(["list", "plugins:fixture-market", "doctor"]);
-    expect(ctx.notifications.map(item => item.message).join("\n")).toContain("ignored: mcp");
+    expect(ctx.notifications.map(item => item.message).join("\n")).toContain("已忽略：mcp");
   });
 
   it("requires confirmation for add and activation", async () => {
@@ -92,8 +109,10 @@ describe("marketplace loader Pi adapter", () => {
     registerMarketplaceLoader(pi.api, { service: service as unknown as MarketplaceService });
     const handler = pi.commands.get("marketplaces")!.handler;
 
-    await handler("add https://example.test/repo.git v1", fakeContext([false]));
+    await handler("add https://example.test/repo.git", fakeContext([false]));
     expect(service.calls).toEqual([]);
+    await handler("add https://example.test/repo.git", fakeContext([true]));
+    expect(service.calls).toContain("add:https://example.test/repo.git:");
     await handler("add https://example.test/repo.git v1", fakeContext([true]));
     expect(service.calls).toContain("add:https://example.test/repo.git:v1");
 
@@ -142,6 +161,6 @@ describe("marketplace loader Pi adapter", () => {
     const invalid = fakeContext();
     await handler("unknown", invalid);
     expect(invalid.notifications.at(-1)?.level).toBe("error");
-    expect(invalid.notifications.at(-1)?.message).toContain("Usage:");
+    expect(invalid.notifications.at(-1)?.message).toContain("用法：");
   });
 });

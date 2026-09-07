@@ -10,8 +10,10 @@
 - `package.json`: Pi package resource manifest and npm verification commands.
 - `tsconfig.json`: TypeScript checking contract for extension source and tests.
 - `extensions/osc-notify/index.ts`: OSC Notify Pi extension entrypoint and runtime composition root.
-- `extensions/marketplace-loader/index.ts`: remote marketplace Pi adapter and `/marketplaces` command entrypoint.
-- `extensions/marketplace-loader/service.ts`: source, snapshot, plugin enablement, update, and diagnostic application service.
+- `extensions/marketplace-loader/index.ts`: remote marketplace Pi adapter and `/plugins` plus `/marketplaces` command entrypoint.
+- `extensions/marketplace-loader/controller.ts`: interactive manager state machine, cancellable operation flow, and close-time reload coordination.
+- `extensions/marketplace-loader/ui.ts`: searchable Marketplace and Plugin settings TUI components.
+- `extensions/marketplace-loader/service.ts`: source, snapshot, atomic plugin enablement, update, and diagnostic application service.
 - `README.md`: installation, configuration, and operator-facing usage.
 
 ## Module Responsibilities

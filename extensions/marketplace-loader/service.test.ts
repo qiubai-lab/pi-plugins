@@ -23,21 +23,71 @@ async function repository(marketplace = "fixture-market", skillName = "alpha-ski
 }
 
 describe("Git snapshot and marketplace service", () => {
+  it("passes one AbortSignal to every Git subprocess", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    let call = 0;
+    const sha = "a".repeat(40);
+    const git = new GitSnapshotter(async (_command, _args, _cwd, signal) => {
+      signals.push(signal);
+      call += 1;
+      return { stdout: call === 2 ? `${sha}\n` : "", stderr: "" };
+    });
+    const controller = new AbortController();
+    await expect(git.materialize("https://example.test/repo.git", "main", join(await temporary("marketplace-signal-"), "snapshot"), controller.signal))
+      .resolves.toEqual({ commit: sha, ref: "main" });
+    expect(signals).toHaveLength(3);
+    expect(signals.every(signal => signal === controller.signal)).toBe(true);
+  });
+
+  it("cleans the destination when Git is aborted", async () => {
+    const parent = await temporary("marketplace-abort-");
+    const destination = join(parent, "snapshot");
+    const controller = new AbortController();
+    const git = new GitSnapshotter(async (_command, _args, _cwd, signal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    }));
+    const pending = git.materialize("https://example.test/repo.git", "main", destination, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow(/aborted/);
+    await expect(readFile(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("materializes an exact ref without retaining Git metadata", async () => {
     const repo = await repository();
     const destination = join(await temporary("marketplace-checkout-parent-"), "snapshot");
     const resolved = await new GitSnapshotter().materialize(repo.remote, repo.commit, destination);
-    expect(resolved).toBe(repo.commit);
+    expect(resolved).toEqual({ commit: repo.commit, ref: repo.commit });
     await expect(readFile(join(destination, ".git", "HEAD"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([
-    ["unsafe remote", "-upload-pack=bad", "main", /Git source/],
-    ["unsafe ref", "https://example.test/repo.git", "--help", /Git ref/],
+    ["unsafe remote", "-upload-pack=bad", "main", /Git 地址/],
+    ["unsafe ref", "https://example.test/repo.git", "--help", /Git 引用/],
   ])("rejects %s before Git execution", async (_label, remote, ref, expected) => {
     const destination = join(await temporary("marketplace-invalid-"), "snapshot");
     await expect(new GitSnapshotter(async () => { throw new Error("runner must not execute"); }).materialize(remote, ref, destination))
       .rejects.toThrow(expected);
+  });
+
+  it("uses origin/HEAD when adding without an explicit ref and persists the resolved branch", async () => {
+    const repo = await repository();
+    const home = await temporary("marketplace-home-");
+    const service = new MarketplaceService(home);
+    const source = await service.addSource(repo.remote);
+    expect(source.ref).toBe("main");
+    expect(source.commit).toBe(repo.commit);
+    expect(JSON.parse(await readFile(join(home, "state.json"), "utf8")).sources["fixture-market"].ref).toBe("main");
+  });
+
+  it("fails and cleans up when origin/HEAD cannot be resolved", async () => {
+    const parent = await temporary("marketplace-default-ref-");
+    const destination = join(parent, "snapshot");
+    const git = new GitSnapshotter(async (_command, args) => {
+      if (args.includes("clone")) return { stdout: "", stderr: "" };
+      throw new Error("missing symbolic ref");
+    });
+    await expect(git.materialize("https://example.test/repo.git", undefined, destination)).rejects.toThrow(/origin\/HEAD/);
+    await expect(readFile(destination)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("adds, enables, persists, disables, and removes a remote marketplace", async () => {
@@ -59,6 +109,19 @@ describe("Git snapshot and marketplace service", () => {
     expect(await recreated.listSources()).toEqual([]);
   });
 
+  it("atomically applies a marketplace-level plugin selection", async () => {
+    const root = await temporary("marketplace-repo-");
+    await writeMarketplace(root, "fixture-market", [{ name: "alpha" }, { name: "beta" }]);
+    const commit = await initializeGit(root);
+    const service = new MarketplaceService(await temporary("marketplace-home-"));
+    await service.addSource(pathToFileURL(root).href, commit);
+    await expect(service.setEnabledPlugins("fixture-market", ["alpha", "beta"])).resolves.toBe(true);
+    expect(await service.discoverSkillPaths()).toHaveLength(2);
+    await expect(service.setEnabledPlugins("fixture-market", ["beta", "alpha"])).resolves.toBe(false);
+    await expect(service.setEnabledPlugins("fixture-market", ["missing"])).rejects.toThrow(/Unknown plugin/);
+    expect(await service.discoverSkillPaths()).toHaveLength(2);
+  });
+
   it("does not enable plugins marked NOT_AVAILABLE", async () => {
     const root = await temporary("marketplace-repo-");
     await writeMarketplace(root, "fixture-market", [{ name: "alpha", installation: "NOT_AVAILABLE" }]);
@@ -76,7 +139,8 @@ describe("Git snapshot and marketplace service", () => {
     await service.addSource(first.remote, first.commit);
     await service.addSource(second.remote, second.commit);
     await service.enable("alpha@first-market");
-    await expect(service.enable("alpha@second-market")).rejects.toThrow(/Skill name collision: shared-skill/);
+    await expect(service.setEnabledPlugins("second-market", ["alpha"])).rejects.toThrow(/Skill name collision: shared-skill/);
+    expect(await service.discoverSkillPaths()).toHaveLength(1);
   });
 
   it("rejects an update that introduces a collision between enabled marketplaces", async () => {
@@ -90,7 +154,7 @@ describe("Git snapshot and marketplace service", () => {
     await writeFile(join(second.root, "plugins/alpha/skills/unique-skill/SKILL.md"), "---\nname: shared-skill\ndescription: collision\n---\n");
     await commitGit(second.root, "collision");
     const candidate = await service.stageUpdate("second-market");
-    await expect(service.activateUpdate(candidate)).rejects.toThrow(/collision after update/);
+    await expect(service.activateUpdate(candidate)).rejects.toThrow(/Skill name collision/);
     expect((await service.listSources()).find(source => source.name === "second-market")?.commit).not.toBe(candidate.newCommit);
     expect(await service.discoverSkillPaths()).toHaveLength(2);
   });
@@ -111,7 +175,7 @@ describe("Git snapshot and marketplace service", () => {
     expect((await service.listSources())[0].commit).toBe(before.commit);
     expect(await service.discoverSkillPaths()).toHaveLength(1);
 
-    await expect(service.stageUpdate("fixture-market", "missing-ref")).rejects.toThrow(/cannot be resolved/);
+    await expect(service.stageUpdate("fixture-market", "missing-ref")).rejects.toThrow(/无法解析 Git 引用/);
     expect((await service.listSources())[0].commit).toBe(before.commit);
 
     const accepted = await service.stageUpdate("fixture-market");

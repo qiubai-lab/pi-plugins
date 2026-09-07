@@ -105,11 +105,23 @@ Qterm 可在「系统设置 → 高级 → 终端通知」中控制接收行为�
 
 P1 不支持 URL、git-subdir、npm plugin source，也不加载 Codex commands、agents、hooks、MCP、apps 或自动执行 scripts。快照会拒绝路径越界、符号链接、特殊文件、重复 skill 名及过大的文件树。
 
-### 管理命令
+### 交互式管理
+
+在 Pi TUI 中运行：
+
+```text
+/plugins
+```
+
+管理器提供可搜索的 Marketplace 列表、Plugin 开关和兼容性详情，并可完成添加、更新、删除和诊断。使用方向键导航、Enter 选择；Plugin 页面用 Space/Enter 切换、Ctrl+S 保存、Esc 放弃。Git 获取期间显示可取消的 Loader，按 Esc 会中止子进程并清理临时快照。资源变更会暂存到管理流程结束，关闭管理器后最多执行一次 reload。
+
+RPC、Print、JSON 等非 TUI 模式不打开交互界面，继续使用以下文本命令。
+
+### 文本管理命令
 
 ```text
 /marketplaces list
-/marketplaces add <git-url> <ref>
+/marketplaces add <git-url> [ref]
 /marketplaces plugins <marketplace>
 /marketplaces enable <plugin>@<marketplace>
 /marketplaces disable <plugin>@<marketplace>
@@ -118,14 +130,14 @@ P1 不支持 URL、git-subdir、npm plugin source，也不加载 Codex commands�
 /marketplaces doctor
 ```
 
-添加仓库只建立经过校验的 commit 快照，不会默认启用 plugin。启用前还会单独确认，因为 skill 是可影响模型工具使用的受信任指令。更新先获取和校验候选快照，再显示旧、新 commit 并确认激活；失败或拒绝不会替换当前快照。
+添加仓库只需提供 Git URL；未指定 ref 时会解析并使用远程 `origin/HEAD` 指向的默认分支，不会猜测 `main`、`master` 或 latest 标签。文本命令仍可通过可选 ref 显式指定 branch、tag 或 commit。添加只建立经过校验的 commit 快照，不会默认启用 Plugin。启用前还会单独确认，因为 Skill 是可影响模型工具使用的受信任指令。更新默认沿用已保存的 ref，不再单独询问；更新会先获取和校验候选快照，再显示旧、新 commit 并确认激活，失败或拒绝不会替换当前快照。
 
 默认状态目录为 `~/.pi/agent/marketplaces/`，可用 `PI_MARKETPLACE_HOME` 覆盖。Git 克隆不初始化 submodule，不运行 npm、Codex、仓库 hooks 或 plugin scripts。
 
 不要在同一 Pi 配置中既由本加载器管理某个 marketplace，又通过 `pi install` 直接安装同一仓库，否则 Pi 可能重复发现 skill。迁移已有安装时先用 `pi list` 确认 source，再在 shell 中执行 `pi remove <my-skills-source>`。集中模式只安装本 `pi-plugins` 包，然后在 Pi 中运行：
 
 ```text
-/marketplaces add <my-skills-git-url> <tag-or-commit>
+/marketplaces add <my-skills-git-url>
 /marketplaces enable apple-design-skills@personal-skills
 ```
 

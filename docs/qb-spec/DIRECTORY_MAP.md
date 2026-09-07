@@ -13,13 +13,14 @@
 - `extensions/marketplace-loader/index.ts`: remote Marketplace Pi adapter and the TUI-only `/plugins` command entrypoint.
 - `extensions/marketplace-loader/controller.ts`: interactive manager state machine, cancellable operation flow, and close-time reload coordination.
 - `extensions/marketplace-loader/ui.ts`: searchable Marketplace and Plugin settings TUI components.
-- `extensions/marketplace-loader/service.ts`: source, snapshot, atomic plugin enablement, update, and diagnostic application service.
+- `extensions/marketplace-loader/service.ts`: source, snapshot, personal enablement, repository installation, update, and diagnostic application service.
+- `extensions/marketplace-loader/project.ts`: trusted Git repository resolution, project lock validation, and rollback-safe `.agents/skills` materialization.
 - `README.md`: installation, configuration, and operator-facing usage.
 
 ## Module Responsibilities
 
 - `extensions/osc-notify/`: owns terminal notification lifecycle integration, final-response excerpting, protocol selection, safe encoding, and focused tests; does not own terminal emulator notification settings or native OS delivery.
-- `extensions/marketplace-loader/`: owns argument-safe Git snapshots, Pi/Codex catalog validation, atomic selection state, dynamic skill discovery, and focused tests; does not invoke Pi package management or execute marketplace content.
+- `extensions/marketplace-loader/`: owns argument-safe Git snapshots, Pi/Codex catalog validation, atomic personal selection state, owned project Skill materialization, dynamic skill discovery, and focused tests; does not invoke Agent package managers or execute marketplace content.
 - `docs/qb-spec/context/`: owns stable architecture and engineering constraints; does not contain task execution history.
 - `docs/qb-spec/specs/`: owns active change scope and acceptance; does not define package discovery behavior.
 

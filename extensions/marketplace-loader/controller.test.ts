@@ -17,6 +17,7 @@ const plugin = {
   description: "Alpha plugin",
   skillRoot: "/skills",
   skillNames: ["alpha-skill"],
+  skillDirectories: { "alpha-skill": "/skills/alpha-skill" },
   installation: "AVAILABLE" as const,
   unsupportedCapabilities: [],
 };
@@ -30,6 +31,8 @@ function context(confirmations: boolean[] = [], inputs: (string | undefined)[] =
   const notifications: { message: string; type?: string }[] = [];
   const ctx = {
     mode: "tui",
+    cwd: "/project",
+    isProjectTrusted() { return true; },
     notifications,
     reloads: 0,
     ui: {
@@ -70,6 +73,10 @@ function service(overrides: Record<string, unknown> = {}) {
     async marketplaceSummaries() { calls.push("summaries"); return [summary]; },
     async listPlugins(name: string) { calls.push(`plugins:${name}`); return [{ plugin, enabled: false }]; },
     async setEnabledPlugins(name: string, enabled: string[]) { calls.push(`set:${name}:${enabled.join(",")}`); return true; },
+    async repositoryRoot(cwd: string) { calls.push(`root:${cwd}`); return "/project"; },
+    async listProjectPlugins(name: string, cwd: string) { calls.push(`project-plugins:${name}:${cwd}`); return [{ plugin, enabled: false }]; },
+    async setProjectPlugins(name: string, cwd: string, enabled: string[]) { calls.push(`project-set:${name}:${cwd}:${enabled.join(",")}`); return true; },
+    async refreshProjectPlugins(name: string, cwd: string) { calls.push(`project-refresh:${name}:${cwd}`); return false; },
     async doctor() { calls.push("doctor"); return { sources: 1, plugins: 1, skills: 1, enabled: 0, staleSelections: [], orphanSnapshots: [] }; },
     async addSource(remote: string, ref: string | undefined, signal: AbortSignal) { calls.push(`add:${remote}:${ref ?? ""}:${signal.aborted}`); return { name: source.name, ref: ref ?? "main", commit: source.commit }; },
     async stageUpdate(name: string, ref: string | undefined, signal: AbortSignal) { calls.push(`stage:${name}:${ref ?? ""}:${signal.aborted}`); return candidate; },
@@ -101,6 +108,62 @@ describe("interactive marketplace controller", () => {
     );
     expect(backend.calls).toContain("set:fixture-market:alpha");
     expect(ctx.reloads).toBe(1);
+  });
+
+  it("installs plugin skills into the current repository and reloads once", async () => {
+    const backend = service();
+    const ctx = context([true]);
+    await runMarketplaceManager(
+      ctx,
+      backend as unknown as MarketplaceService,
+      views([{ kind: "source", marketplace: source.name }, null], ["project-plugins", "back"], { save: true, enabled: ["alpha"] }),
+      immediateOperation,
+    );
+    expect(backend.calls).toContain("project-plugins:fixture-market:/project");
+    expect(backend.calls).toContain("project-set:fixture-market:/project:alpha");
+    expect(ctx.reloads).toBe(1);
+  });
+
+  it("requires confirmation before disabling a personal plugin", async () => {
+    const declined = service({
+      async listPlugins(name: string) { declined.calls.push(`plugins:${name}`); return [{ plugin, enabled: true }]; },
+    });
+    await runMarketplaceManager(
+      context([false]),
+      declined as unknown as MarketplaceService,
+      views([{ kind: "source", marketplace: source.name }, null], ["plugins", "back"], { save: true, enabled: [] }),
+      immediateOperation,
+    );
+    expect(declined.calls.some(call => call.startsWith("set:"))).toBe(false);
+
+    const accepted = service({
+      async listPlugins(name: string) { accepted.calls.push(`plugins:${name}`); return [{ plugin, enabled: true }]; },
+    });
+    await runMarketplaceManager(
+      context([true]),
+      accepted as unknown as MarketplaceService,
+      views([{ kind: "source", marketplace: source.name }, null], ["plugins", "back"], { save: true, enabled: [] }),
+      immediateOperation,
+    );
+    expect(accepted.calls).toContain("set:fixture-market:");
+  });
+
+  it("requires confirmation before uninstalling a repository plugin", async () => {
+    const backend = service({
+      async listProjectPlugins(name: string, cwd: string) {
+        backend.calls.push(`project-plugins:${name}:${cwd}`);
+        return [{ plugin, enabled: true }];
+      },
+    });
+    const ctx = context([false]);
+    await runMarketplaceManager(
+      ctx,
+      backend as unknown as MarketplaceService,
+      views([{ kind: "source", marketplace: source.name }, null], ["project-plugins", "back"], { save: true, enabled: [] }),
+      immediateOperation,
+    );
+    expect(backend.calls.some(call => call.startsWith("project-set:"))).toBe(false);
+    expect(ctx.reloads).toBe(0);
   });
 
   it("discards plugin drafts when trust confirmation is declined", async () => {

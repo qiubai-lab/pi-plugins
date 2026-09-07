@@ -8,9 +8,8 @@ import {
   type PluginDraftResult,
   type SourceChoice,
 } from "./ui.ts";
-import type { MarketplaceSummary } from "./service.ts";
+import type { MarketplaceSummary, PluginStatus } from "./service.ts";
 import type { MarketplaceSourceState } from "./state.ts";
-import type { ManagedPlugin } from "./catalog.ts";
 
 export interface MarketplaceManagerViews {
   marketplaceList(ctx: ExtensionCommandContext, summaries: MarketplaceSummary[]): Promise<MarketplaceChoice | null>;
@@ -18,7 +17,8 @@ export interface MarketplaceManagerViews {
   pluginSettings(
     ctx: ExtensionCommandContext,
     marketplace: string,
-    plugins: { plugin: ManagedPlugin; enabled: boolean }[],
+    plugins: PluginStatus[],
+    options?: { scope?: "personal" | "project"; projectRoot?: string },
   ): Promise<PluginDraftResult>;
 }
 
@@ -102,8 +102,16 @@ async function updateMarketplace(
     if (!confirmed) return false;
     await service.activateUpdate(candidate);
     activated = true;
+    let projectChanged = false;
+    if (ctx.isProjectTrusted()) {
+      try {
+        projectChanged = await service.refreshProjectPlugins(summary.source.name, ctx.cwd);
+      } catch (error) {
+        ctx.ui.notify(`Marketplace 已更新，但当前仓库安装未同步：${errorMessage(error)}`, "warning");
+      }
+    }
     ctx.ui.notify(`已将 ${summary.source.name} 更新到 ${candidate.newCommit}。`, "info");
-    return summary.enabledCount > 0;
+    return summary.enabledCount > 0 || projectChanged;
   } catch (error) {
     ctx.ui.notify(errorMessage(error), "error");
     return false;
@@ -139,7 +147,7 @@ async function editPlugins(
   marketplace: string,
   views: MarketplaceManagerViews,
 ): Promise<boolean> {
-  const plugins = await service.listPlugins(marketplace);
+  const plugins = await service.listPlugins(marketplace, ctx.cwd, ctx.isProjectTrusted());
   const draft = await views.pluginSettings(ctx, marketplace, plugins);
   if (!draft.save) return false;
   const original = new Set(plugins.filter(item => item.enabled).map(item => item.plugin.name));
@@ -154,6 +162,14 @@ async function editPlugins(
     );
     if (!confirmed) return false;
   }
+  const removals = [...original].filter(name => !draft.enabled.includes(name));
+  if (removals.length > 0) {
+    const confirmed = await ctx.ui.confirm(
+      "确认从个人配置停用 Plugin？",
+      `${removals.join(", ")} 将不再由 Pi 为所有仓库加载。`,
+    );
+    if (!confirmed) return false;
+  }
   try {
     const changed = await service.setEnabledPlugins(marketplace, draft.enabled);
     if (changed) ctx.ui.notify(`已更新 ${marketplace} 的 Plugin 选择。`, "info");
@@ -162,6 +178,48 @@ async function editPlugins(
     ctx.ui.notify(errorMessage(error), "error");
     return false;
   }
+}
+
+async function editProjectPlugins(
+  ctx: ExtensionCommandContext,
+  service: MarketplaceService,
+  marketplace: string,
+  views: MarketplaceManagerViews,
+): Promise<boolean> {
+  if (!ctx.isProjectTrusted()) {
+    ctx.ui.notify("项目未受信任，不能写入仓库级 Skill。请先使用 /trust 并重启 Pi。", "error");
+    return false;
+  }
+  const root = await service.repositoryRoot(ctx.cwd);
+  const plugins = await service.listProjectPlugins(marketplace, root);
+  const draft = await views.pluginSettings(ctx, marketplace, plugins, { scope: "project", projectRoot: root });
+  if (!draft.save) return false;
+  const original = new Set(plugins.filter(item => item.enabled).map(item => item.plugin.name));
+  const additions = draft.enabled.filter(name => !original.has(name));
+  if (additions.length > 0) {
+    const skillCount = plugins
+      .filter(item => additions.includes(item.plugin.name))
+      .reduce((sum, item) => sum + item.plugin.skillNames.length, 0);
+    const confirmed = await ctx.ui.confirm(
+      "信任并安装 Plugin Skill 到当前仓库？",
+      `${additions.join(", ")} 将把 ${skillCount} 个 Skill 写入：\n${root}/.agents/skills\n其他支持 Agent Skills 的 Agent 也可以发现这些 Skill。`,
+    );
+    if (!confirmed) return false;
+  }
+  const removals = [...original].filter(name => !draft.enabled.includes(name));
+  if (removals.length > 0) {
+    const skillCount = plugins
+      .filter(item => removals.includes(item.plugin.name))
+      .reduce((sum, item) => sum + item.plugin.skillNames.length, 0);
+    const confirmed = await ctx.ui.confirm(
+      "确认从当前仓库卸载 Plugin？",
+      `${removals.join(", ")} 将从 ${root}/.agents/skills 移除 ${skillCount} 个由 Marketplace Loader 管理的 Skill。`,
+    );
+    if (!confirmed) return false;
+  }
+  const changed = await service.setProjectPlugins(marketplace, root, draft.enabled);
+  if (changed) ctx.ui.notify(`已更新 ${marketplace} 在当前仓库中的 Skill 安装。`, "info");
+  return changed;
 }
 
 function doctorMessage(report: Awaited<ReturnType<MarketplaceService["doctor"]>>): { message: string; warning: boolean } {
@@ -214,6 +272,8 @@ export async function runMarketplaceManager(
         openMarketplace = undefined;
       } else if (action === "plugins") {
         resourcesChanged = await editPlugins(ctx, service, summary.source.name, views) || resourcesChanged;
+      } else if (action === "project-plugins") {
+        resourcesChanged = await editProjectPlugins(ctx, service, summary.source.name, views) || resourcesChanged;
       } else if (action === "update") {
         resourcesChanged = await updateMarketplace(ctx, service, summary, runOperation) || resourcesChanged;
       } else if (action === "remove") {

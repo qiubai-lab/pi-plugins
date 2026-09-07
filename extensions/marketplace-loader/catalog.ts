@@ -1,5 +1,5 @@
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { resolveContainedDirectory, validateSnapshotTree, type TreeLimits } from "./tree.ts";
 
 const SAFE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -12,6 +12,7 @@ export interface ManagedPlugin {
   description: string;
   skillRoot: string;
   skillNames: string[];
+  skillDirectories: Record<string, string>;
   installation: InstallationPolicy;
   unsupportedCapabilities: string[];
 }
@@ -132,12 +133,14 @@ export async function loadManagedCatalog(snapshotRoot: string, limits?: TreeLimi
     const skillFiles = await findSkillFiles(skillRoot);
     if (skillFiles.length === 0) throw new Error(`plugin ${pluginName} contains no SKILL.md files`);
     const skillNames: string[] = [];
+    const skillDirectories: Record<string, string> = {};
     for (const file of skillFiles) {
       const currentName = skillName(await readFile(file, "utf8"), file);
       const owner = skillOwners.get(currentName);
       if (owner) throw new Error(`duplicate skill name ${currentName} in plugins ${owner} and ${pluginName}`);
       skillOwners.set(currentName, pluginName);
       skillNames.push(currentName);
+      skillDirectories[currentName] = dirname(file);
     }
     const policy = entry.policy === undefined ? {} : object(entry.policy, `plugin ${pluginName} policy`);
     const installation = policy.installation === undefined ? "AVAILABLE" : string(policy.installation, `plugin ${pluginName} installation`);
@@ -160,6 +163,7 @@ export async function loadManagedCatalog(snapshotRoot: string, limits?: TreeLimi
       description,
       skillRoot,
       skillNames,
+      skillDirectories,
       installation: installation as InstallationPolicy,
       unsupportedCapabilities: capabilities.sort(),
     });

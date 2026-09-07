@@ -16,9 +16,9 @@ export function registerMarketplaceLoader(pi: ExtensionAPI, options: Marketplace
   const service = options.service ?? new MarketplaceService(home);
   const manager = options.manager ?? runMarketplaceManager;
 
-  pi.on("resources_discover", async (_event, ctx) => {
+  pi.on("resources_discover", async (event, ctx) => {
     try {
-      return { skillPaths: await service.discoverSkillPaths() };
+      return { skillPaths: await service.discoverSkillPaths(event.cwd, ctx.isProjectTrusted()) };
     } catch (error) {
       if (ctx.mode === "tui") {
         ctx.ui.notify(`Marketplace Loader 未加载任何 Skill：${error instanceof Error ? error.message : String(error)}`, "error");

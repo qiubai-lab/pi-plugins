@@ -14,18 +14,19 @@ import {
   type SettingItem,
   SettingsList,
   type SettingsListTheme,
+  sliceByColumn,
   truncateToWidth,
+  visibleWidth,
 } from "@earendil-works/pi-tui";
-import type { MarketplaceSummary } from "./service.ts";
+import type { MarketplaceSummary, PluginStatus } from "./service.ts";
 import type { MarketplaceSourceState } from "./state.ts";
-import type { ManagedPlugin } from "./catalog.ts";
 
 export type MarketplaceChoice =
   | { kind: "add" }
   | { kind: "doctor" }
   | { kind: "source"; marketplace: string };
 
-export type SourceChoice = "plugins" | "update" | "remove" | "back";
+export type SourceChoice = "plugins" | "project-plugins" | "update" | "remove" | "back";
 
 export interface PluginDraftResult {
   save: boolean;
@@ -36,6 +37,10 @@ class SearchableSelectScreen implements Component, Focusable {
   private readonly border: DynamicBorder;
   private readonly input: Input;
   private readonly list: SelectList;
+  private readonly listViewportHeight: number;
+  private readonly descriptions = new Map<SelectItem, string>();
+  private marqueeOffset = 0;
+  private descriptionWidth = 0;
 
   constructor(
     private readonly title: string,
@@ -50,13 +55,19 @@ class SearchableSelectScreen implements Component, Focusable {
       placeholder: "输入关键词筛选",
       placeholderStyle: text => theme.fg("dim", text),
     });
-    this.list = new SelectList(items, Math.min(Math.max(items.length, 3), 14), {
+    for (const item of items) {
+      if (item.description) this.descriptions.set(item, item.description);
+    }
+    const maxVisible = Math.min(Math.max(items.length, 3), 14);
+    this.listViewportHeight = maxVisible + (items.length > maxVisible ? 1 : 0);
+    this.list = new SelectList(items, maxVisible, {
       selectedPrefix: text => theme.fg("accent", text),
       selectedText: text => theme.fg("accent", text),
       description: text => theme.fg("muted", text),
       scrollInfo: text => theme.fg("dim", text),
       noMatch: text => theme.fg("warning", text),
     });
+    this.list.onSelectionChange = () => { this.marqueeOffset = 0; };
     this.list.onSelect = item => done(item.value);
     this.list.onCancel = () => done(null);
   }
@@ -64,14 +75,45 @@ class SearchableSelectScreen implements Component, Focusable {
   get focused(): boolean { return this.input.focused; }
   set focused(value: boolean) { this.input.focused = value; }
 
+  private updateMarquee(): void {
+    for (const [item, description] of this.descriptions) item.description = description;
+    const selected = this.list.getSelectedItem();
+    const description = selected ? this.descriptions.get(selected) : undefined;
+    if (!selected || !description || this.descriptionWidth <= 0 || visibleWidth(description) <= this.descriptionWidth) return;
+    const cycle = `${description}   `;
+    const cycleWidth = visibleWidth(cycle);
+    const doubled = cycle + cycle;
+    selected.description = sliceByColumn(doubled, this.marqueeOffset % cycleWidth, cycleWidth, true);
+  }
+
+  advanceMarquee(): boolean {
+    const selected = this.list.getSelectedItem();
+    const description = selected ? this.descriptions.get(selected) : undefined;
+    if (!description || this.descriptionWidth <= 0 || visibleWidth(description) <= this.descriptionWidth) return false;
+    this.marqueeOffset += 1;
+    return true;
+  }
+
+  dispose(): void {
+    for (const [item, description] of this.descriptions) item.description = description;
+  }
+
   render(width: number): string[] {
     const innerWidth = Math.max(1, width - 2);
+    const primaryWidth = Math.max(1, Math.min(32, innerWidth - 6));
+    this.descriptionWidth = innerWidth > 40 ? Math.max(0, innerWidth - 2 - primaryWidth - 2) : 0;
+    this.updateMarquee();
+    const listLines = this.list.render(innerWidth);
+    const paddedListLines = [
+      ...listLines,
+      ...Array(Math.max(0, this.listViewportHeight - listLines.length)).fill(""),
+    ];
     return [
       ...this.border.render(width),
       truncateToWidth(` ${this.theme.fg("accent", this.theme.bold(this.title))}`, width, ""),
       ...this.input.render(innerWidth).map(line => truncateToWidth(` ${line}`, width, "")),
       "",
-      ...this.list.render(innerWidth).map(line => truncateToWidth(` ${line}`, width, "")),
+      ...paddedListLines.map(line => truncateToWidth(` ${line}`, width, "")),
       "",
       truncateToWidth(` ${this.theme.fg("dim", this.footer)}`, width, ""),
       ...this.border.render(width),
@@ -85,6 +127,7 @@ class SearchableSelectScreen implements Component, Focusable {
     }
     this.input.handleInput(data);
     this.list.setFilter(this.input.getValue());
+    this.marqueeOffset = 0;
   }
 
   invalidate(): void {
@@ -105,7 +148,16 @@ async function showSearchableSelect(
   footer: string,
 ): Promise<string | null> {
   return ctx.ui.custom<string | null>((tui, theme, _keybindings, done) => {
-    const screen = new SearchableSelectScreen(title, items, footer, theme, done);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const finish = (value: string | null) => {
+      if (timer) clearInterval(timer);
+      screen.dispose();
+      done(value);
+    };
+    const screen = new SearchableSelectScreen(title, items, footer, theme, finish);
+    timer = setInterval(() => {
+      if (screen.advanceMarquee()) tui.requestRender();
+    }, 250);
     return {
       get focused() { return screen.focused; },
       set focused(value: boolean) { screen.focused = value; },
@@ -149,36 +201,70 @@ export async function showSourceActions(
   source: MarketplaceSourceState,
 ): Promise<SourceChoice> {
   const selected = await showSearchableSelect(ctx, source.displayName, [
-    { value: "plugins", label: "管理 Plugin", description: "启用、停用并检查 Plugin Skill" },
-    { value: "update", label: "更新快照", description: `${source.ref} @ ${source.commit.slice(0, 12)}` },
+    { value: "plugins", label: "Plugin 安装（个人）", description: "作用域：所有仓库；保存在个人配置中，仅由 Pi 加载" },
+    { value: "project-plugins", label: "Plugin 安装（仓库）", description: "作用域：当前仓库；复制到 .agents/skills，可供其他 Agent 发现" },
+    { value: "update", label: "更新 Marketplace", description: `${source.ref} @ ${source.commit.slice(0, 12)}` },
     { value: "remove", label: "移除 Marketplace", description: "删除私有快照和选择状态" },
     { value: "back", label: "返回", description: "返回 Marketplace 列表" },
   ], "Enter 选择 · Esc 返回");
   return (selected ?? "back") as SourceChoice;
 }
 
+export function limitSettingsDescription(
+  lines: string[],
+  width: number,
+  style: (text: string) => string,
+): string[] {
+  const trailingBlank = lines.length - 2;
+  if (trailingBlank <= 0 || visibleWidth(lines[trailingBlank] ?? "") !== 0) return lines;
+  let separator = trailingBlank - 1;
+  while (separator >= 0 && visibleWidth(lines[separator] ?? "") !== 0) separator -= 1;
+  if (separator < 0) return lines;
+
+  const description = lines.slice(separator + 1, trailingBlank);
+  const fixed = description.slice(0, 2);
+  if (description.length > 2 && fixed[1] !== undefined) {
+    const ellipsis = style("...");
+    fixed[1] = truncateToWidth(fixed[1], Math.max(0, width - visibleWidth(ellipsis)), "") + ellipsis;
+  }
+  while (fixed.length < 2) fixed.push(style("  "));
+  return [...lines.slice(0, separator + 1), ...fixed, ...lines.slice(trailingBlank)];
+}
+
 export async function showPluginSettings(
   ctx: ExtensionCommandContext,
   marketplace: string,
-  plugins: { plugin: ManagedPlugin; enabled: boolean }[],
+  plugins: PluginStatus[],
+  options: { scope?: "personal" | "project"; projectRoot?: string } = {},
 ): Promise<PluginDraftResult> {
+  const project = options.scope === "project";
   const enabled = new Set(
     plugins
       .filter(item => item.enabled && item.plugin.installation !== "NOT_AVAILABLE")
       .map(item => item.plugin.name),
   );
+  const initialEnabled = new Set(enabled);
+  const hasChanges = () => enabled.size !== initialEnabled.size
+    || [...enabled].some(name => !initialEnabled.has(name));
   return ctx.ui.custom<PluginDraftResult>((tui, theme, _keybindings, done) => {
-    const items: SettingItem[] = plugins.map(({ plugin, enabled: isEnabled }) => {
+    const items: SettingItem[] = plugins.map(({ plugin, enabled: isEnabled, otherScopeEnabled }) => {
       const ignored = plugin.unsupportedCapabilities.length
         ? ` 已忽略：${plugin.unsupportedCapabilities.join(", ")}。`
         : "";
+      const otherScope = otherScopeEnabled
+        ? project ? " 提示：已安装到个人配置中。" : " 提示：已安装到仓库配置中。"
+        : "";
+      const otherScopeLabel = project ? "个人" : "仓库";
+      const enabledValue = "[*] 已安装";
+      const disabledValue = "[ ] 未安装";
+      const scopeSuffix = otherScopeEnabled ? ` · 已安装到${otherScopeLabel}配置中` : "";
       const unavailable = plugin.installation === "NOT_AVAILABLE";
       return {
         id: plugin.name,
         label: plugin.name,
-        description: `${plugin.description} · ${plugin.skillNames.length} 个 Skill。${ignored}`,
-        currentValue: unavailable ? "不可用" : isEnabled ? "已启用" : "已停用",
-        values: unavailable ? undefined : ["已启用", "已停用"],
+        description: `${plugin.description} · ${plugin.skillNames.length} 个 Skill。${ignored}${otherScope}`,
+        currentValue: unavailable ? "不可用" : `${isEnabled ? enabledValue : disabledValue}${scopeSuffix}`,
+        values: unavailable ? undefined : [`${enabledValue}${scopeSuffix}`, `${disabledValue}${scopeSuffix}`],
       };
     });
     const settingsTheme: SettingsListTheme = {
@@ -193,20 +279,37 @@ export async function showPluginSettings(
       Math.min(Math.max(items.length + 2, 5), 16),
       settingsTheme,
       (id, value) => {
-        if (value === "已启用") enabled.add(id);
+        if (value.startsWith("[*]")) enabled.add(id);
         else enabled.delete(id);
       },
-      () => done({ save: false, enabled: [] }),
+      () => done({ save: hasChanges(), enabled: [...enabled].sort() }),
       { enableSearch: true },
     );
     const border = new DynamicBorder((text: string) => theme.fg("accent", text));
+    let settingsViewportWidth = -1;
+    let settingsViewportHeight = 0;
     return {
       render(width: number) {
+        const innerWidth = Math.max(1, width - 2);
+        const limitedSettings = limitSettingsDescription(settings.render(innerWidth), innerWidth, settingsTheme.description);
+        if (settingsViewportWidth !== innerWidth) {
+          settingsViewportWidth = innerWidth;
+          settingsViewportHeight = limitedSettings.length;
+        } else {
+          settingsViewportHeight = Math.max(settingsViewportHeight, limitedSettings.length);
+        }
+        const settingsLines = [
+          ...limitedSettings,
+          ...Array(Math.max(0, settingsViewportHeight - limitedSettings.length)).fill(""),
+        ];
         return [
           ...border.render(width),
-          truncateToWidth(` ${theme.fg("accent", theme.bold(`Plugin · ${marketplace}`))}`, width, ""),
-          ...settings.render(Math.max(1, width - 2)).map(line => truncateToWidth(` ${line}`, width, "")),
-          truncateToWidth(` ${theme.fg("dim", "Space/Enter 切换 · Ctrl+S 保存 · Esc 放弃")}`, width, ""),
+          truncateToWidth(` ${theme.fg("accent", theme.bold(`Plugin · ${marketplace} · ${project ? "当前仓库" : "个人"}`))}`, width, ""),
+          ...(project && options.projectRoot
+            ? [truncateToWidth(` ${theme.fg("dim", `${options.projectRoot}/.agents/skills`)}`, width, "")]
+            : []),
+          ...settingsLines.map(line => truncateToWidth(` ${line}`, width, "")),
+          truncateToWidth(` ${theme.fg("dim", "Space/Enter 切换 · Ctrl+S 保存 · Esc 保存并返回")}`, width, ""),
           ...border.render(width),
         ];
       },

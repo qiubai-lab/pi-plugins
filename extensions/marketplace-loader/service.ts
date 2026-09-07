@@ -1,9 +1,10 @@
-import { mkdir, realpath, readdir, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, realpath, readdir, rename, rm } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadManagedCatalog, type ManagedCatalog, type ManagedPlugin } from "./catalog.ts";
 import { GitSnapshotter } from "./git.ts";
 import { MarketplaceStateStore, type MarketplaceLoaderState, type MarketplaceSourceState } from "./state.ts";
+import { ProjectMarketplaceStore, repositoryRoot } from "./project.ts";
 import type { TreeLimits } from "./tree.ts";
 
 export interface UpdateCandidate {
@@ -29,6 +30,12 @@ export interface MarketplaceSummary {
   pluginCount: number;
   skillCount: number;
   enabledCount: number;
+}
+
+export interface PluginStatus {
+  plugin: ManagedPlugin;
+  enabled: boolean;
+  otherScopeEnabled?: boolean;
 }
 
 function selector(plugin: string, marketplace: string): string {
@@ -87,11 +94,108 @@ export class MarketplaceService {
     return summaries;
   }
 
-  async listPlugins(marketplace: string): Promise<{ plugin: ManagedPlugin; enabled: boolean }[]> {
+  async listPlugins(marketplace: string, cwd?: string, projectTrusted = false): Promise<PluginStatus[]> {
     const state = await this.store.load();
     const catalog = await this.catalogFor(state, marketplace);
     const enabled = new Set(state.enabled);
-    return catalog.plugins.map(plugin => ({ plugin, enabled: enabled.has(selector(plugin.name, marketplace)) }));
+    const projectInstalled = new Set<string>();
+    if (cwd && projectTrusted) {
+      try {
+        const project = new ProjectMarketplaceStore(await repositoryRoot(cwd));
+        for (const name of (await project.load()).sources[marketplace]?.plugins ?? []) projectInstalled.add(name);
+      } catch (error) {
+        if (!(error instanceof Error && error.message.includes("不在 Git 仓库"))) throw error;
+      }
+    }
+    return catalog.plugins.map(plugin => ({
+      plugin,
+      enabled: enabled.has(selector(plugin.name, marketplace)),
+      otherScopeEnabled: projectInstalled.has(plugin.name),
+    }));
+  }
+
+  async repositoryRoot(cwd: string): Promise<string> {
+    return repositoryRoot(cwd);
+  }
+
+  async listProjectPlugins(marketplace: string, cwd: string): Promise<PluginStatus[]> {
+    const state = await this.store.load();
+    const catalog = await this.catalogFor(state, marketplace);
+    const personal = new Set(state.enabled);
+    const project = new ProjectMarketplaceStore(await repositoryRoot(cwd));
+    const installed = new Set((await project.load()).sources[marketplace]?.plugins ?? []);
+    return catalog.plugins.map(plugin => ({
+      plugin,
+      enabled: installed.has(plugin.name),
+      otherScopeEnabled: personal.has(selector(plugin.name, marketplace)),
+    }));
+  }
+
+  async setProjectPlugins(marketplace: string, cwd: string, pluginNames: Iterable<string>): Promise<boolean> {
+    const state = await this.store.load();
+    const source = state.sources[marketplace];
+    if (!source) throw new Error(`Unknown marketplace: ${marketplace}`);
+    const catalog = await this.catalogFor(state, marketplace);
+    const desired = [...new Set(pluginNames)].sort();
+    for (const pluginName of desired) {
+      const plugin = catalog.plugins.find(item => item.name === pluginName);
+      if (!plugin) throw new Error(`Unknown plugin: ${pluginName}@${marketplace}`);
+      if (plugin.installation === "NOT_AVAILABLE") throw new Error(`Plugin is not available: ${pluginName}@${marketplace}`);
+    }
+
+    const project = new ProjectMarketplaceStore(await repositoryRoot(cwd));
+    const previous = await project.load();
+    const before = previous.sources[marketplace];
+    const selectionUnchanged = before?.commit === source.commit && before.plugins.length === desired.length
+      && before.plugins.every((name, index) => name === desired[index]);
+    if (selectionUnchanged) {
+      const expected = desired.flatMap(pluginName => catalog.plugins.find(item => item.name === pluginName)!.skillNames);
+      const healthy = await Promise.all(expected.map(async name => {
+        const owner = previous.skills[name];
+        if (owner?.marketplace !== marketplace) return false;
+        try { return (await lstat(join(project.skillsRoot, name))).isDirectory(); } catch { return false; }
+      }));
+      if (healthy.every(Boolean)) return false;
+    }
+
+    const next = structuredClone(previous);
+    for (const [skillName, owner] of Object.entries(next.skills)) {
+      if (owner.marketplace === marketplace) delete next.skills[skillName];
+    }
+    if (desired.length === 0) {
+      delete next.sources[marketplace];
+    } else {
+      next.sources[marketplace] = {
+        remote: source.remote,
+        ref: source.ref,
+        commit: source.commit,
+        plugins: desired,
+      };
+    }
+
+    const copies: Record<string, string> = {};
+    for (const pluginName of desired) {
+      const plugin = catalog.plugins.find(item => item.name === pluginName)!;
+      for (const skillName of plugin.skillNames) {
+        const existing = next.skills[skillName];
+        if (existing) {
+          throw new Error(`Skill name collision: ${skillName} is installed by ${existing.plugin}@${existing.marketplace}`);
+        }
+        next.skills[skillName] = { marketplace, plugin: pluginName };
+        copies[skillName] = plugin.skillDirectories[skillName];
+      }
+    }
+
+    await project.replaceSkills(previous, next, copies);
+    return true;
+  }
+
+  async refreshProjectPlugins(marketplace: string, cwd: string): Promise<boolean> {
+    const project = new ProjectMarketplaceStore(await repositoryRoot(cwd));
+    const lock = await project.load();
+    const plugins = lock.sources[marketplace]?.plugins;
+    if (!plugins) return false;
+    return this.setProjectPlugins(marketplace, cwd, plugins);
   }
 
   private async materialize(remote: string, ref: string | undefined, signal?: AbortSignal): Promise<{ path: string; commit: string; ref: string; catalog: ManagedCatalog }> {
@@ -309,8 +413,17 @@ export class MarketplaceService {
     return true;
   }
 
-  async discoverSkillPaths(): Promise<string[]> {
+  async discoverSkillPaths(cwd?: string, projectTrusted = false): Promise<string[]> {
     const state = await this.store.load();
+    const projectSkills = new Set<string>();
+    if (cwd && projectTrusted) {
+      try {
+        const project = new ProjectMarketplaceStore(await repositoryRoot(cwd));
+        for (const name of Object.keys((await project.load()).skills)) projectSkills.add(name);
+      } catch (error) {
+        if (!(error instanceof Error && error.message.includes("不在 Git 仓库"))) throw error;
+      }
+    }
     const paths: string[] = [];
     for (const value of state.enabled) {
       let target: { plugin: string; marketplace: string };
@@ -318,7 +431,10 @@ export class MarketplaceService {
       if (!state.sources[target.marketplace]) continue;
       const catalog = await this.catalogFor(state, target.marketplace);
       const plugin = catalog.plugins.find(item => item.name === target.plugin);
-      if (plugin && plugin.installation !== "NOT_AVAILABLE") paths.push(plugin.skillRoot);
+      if (!plugin || plugin.installation === "NOT_AVAILABLE") continue;
+      for (const skillName of plugin.skillNames) {
+        if (!projectSkills.has(skillName)) paths.push(plugin.skillDirectories[skillName]);
+      }
     }
     return paths;
   }

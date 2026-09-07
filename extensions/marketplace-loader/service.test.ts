@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,6 +107,42 @@ describe("Git snapshot and marketplace service", () => {
     expect(await recreated.discoverSkillPaths()).toEqual([]);
     expect(await recreated.removeSource("fixture-market")).toBe(false);
     expect(await recreated.listSources()).toEqual([]);
+  });
+
+  it("installs selected plugin skills into a repository and masks duplicate personal discovery", async () => {
+    const repo = await repository();
+    const service = new MarketplaceService(await temporary("marketplace-home-"));
+    await service.addSource(repo.remote, repo.commit);
+    await service.enable("alpha@fixture-market");
+
+    const project = await temporary("marketplace-project-");
+    await writeFile(join(project, "README.md"), "fixture\n");
+    await initializeGit(project);
+    await expect(service.setProjectPlugins("fixture-market", project, ["alpha"])).resolves.toBe(true);
+    expect(await readFile(join(project, ".agents/skills/alpha-skill/SKILL.md"), "utf8")).toContain("name: alpha-skill");
+    const lock = JSON.parse(await readFile(join(project, ".pi/marketplace-loader.lock.json"), "utf8"));
+    expect(lock.sources["fixture-market"].plugins).toEqual(["alpha"]);
+    expect((await service.listPlugins("fixture-market", project, true))[0].otherScopeEnabled).toBe(true);
+    expect((await service.listProjectPlugins("fixture-market", project))[0].otherScopeEnabled).toBe(true);
+    expect(await service.discoverSkillPaths(project, true)).toEqual([]);
+    expect(await service.discoverSkillPaths(project, false)).toHaveLength(1);
+
+    await expect(service.setProjectPlugins("fixture-market", project, [])).resolves.toBe(true);
+    await expect(readFile(join(project, ".agents/skills/alpha-skill/SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses to overwrite repository skills not owned by the project lock", async () => {
+    const repo = await repository();
+    const service = new MarketplaceService(await temporary("marketplace-home-"));
+    await service.addSource(repo.remote, repo.commit);
+    const project = await temporary("marketplace-project-");
+    await writeFile(join(project, "README.md"), "fixture\n");
+    await initializeGit(project);
+    await mkdir(join(project, ".agents/skills/alpha-skill"), { recursive: true });
+    await writeFile(join(project, ".agents/skills/alpha-skill/SKILL.md"), "user-owned\n");
+    await expect(service.setProjectPlugins("fixture-market", project, ["alpha"]))
+      .rejects.toThrow(/拒绝覆盖非 Marketplace Loader 管理/);
+    expect(await readFile(join(project, ".agents/skills/alpha-skill/SKILL.md"), "utf8")).toBe("user-owned\n");
   });
 
   it("atomically applies a marketplace-level plugin selection", async () => {

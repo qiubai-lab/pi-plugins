@@ -4,19 +4,79 @@
 
 ## 安装
 
-从私有 Git 仓库安装：
+推荐通过 GitHub HTTPS 地址安装到个人配置，使插件在所有仓库中可用：
 
 ```sh
-pi install git:git@github.com:qiubai-lab/pi-plugins.git
+pi install https://github.com/qiubai-lab/pi-plugins.git
 ```
 
-在仓库内临时加载全部插件：
+安装后可确认 package 来源和安装位置：
 
 ```sh
-pi -e .
+pi list
+```
+
+若只希望在当前项目加载本 package，可在已信任的项目根目录执行：
+
+```sh
+pi install -l https://github.com/qiubai-lab/pi-plugins.git
+```
+
+项目级 package 会写入 `.pi/settings.json`；它控制 Marketplace Loader 和 OSC Notify 扩展在哪些项目加载，不等同于 `/plugins` 中 Plugin 的“个人/仓库”安装作用域。
+
+### Package 配置
+
+运行 `pi config` 可以启用或停用本 package 中的独立扩展：
+
+```sh
+pi config
+```
+
+- 默认编辑个人配置 `~/.pi/agent/settings.json`；
+- `pi config -l` 编辑当前项目的 `.pi/settings.json`；
+- 配置界面中可分别控制 `marketplace-loader` 和 `osc-notify`；
+- 项目配置会覆盖或收窄继承的个人 package 配置。
+
+更新已安装的 package：
+
+```sh
+# 更新所有未固定版本的 package
+pi update --extensions
+
+# 只更新本 package
+pi update --extension https://github.com/qiubai-lab/pi-plugins.git
+```
+
+在本仓库开发时，已安装版本与 `-e .` 会重复注册扩展。应禁用自动发现的扩展，只临时加载当前工作区：
+
+```sh
+pi -ne -e .
 ```
 
 Pi package 中只会发现 `extensions/*/index.ts`，测试和内部模块不会被当成插件加载。
+
+### 卸载
+
+建议先在 Pi TUI 中清理 Marketplace Loader 管理的状态：
+
+1. 在每个使用过仓库安装的项目中运行 `/plugins`，进入对应 Marketplace 的“Plugin 安装（仓库）”，取消安装并确认；
+2. 在“Plugin 安装（个人）”中停用不再需要的 Plugin；
+3. 从 Marketplace 操作页选择“移除 Marketplace”，删除私有快照和选择状态；
+4. 退出 Pi 后移除 package。
+
+个人安装的 package：
+
+```sh
+pi remove https://github.com/qiubai-lab/pi-plugins.git
+```
+
+项目安装的 package：
+
+```sh
+pi remove -l https://github.com/qiubai-lab/pi-plugins.git
+```
+
+如果安装时使用了其他 source 写法，先运行 `pi list`，再把其中显示的原始 source 传给 `pi remove`。直接移除 package 不会自动删除已经复制到其他仓库 `.agents/skills/` 的 Skill，因此应优先按上述顺序在 `/plugins` 中卸载。
 
 ## OSC Notify
 
@@ -113,13 +173,17 @@ P1 不支持 URL、git-subdir、npm plugin source，也不加载 Codex commands�
 /plugins
 ```
 
-管理器提供可搜索的 Marketplace 列表、Plugin 开关和兼容性详情，并可完成添加、更新、删除和诊断。使用方向键导航、Enter 选择；Plugin 页面用 Space/Enter 切换、Ctrl+S 保存、Esc 放弃。Git 获取期间显示可取消的 Loader，按 Esc 会中止子进程并清理临时快照。资源变更会暂存到管理流程结束，关闭管理器后最多执行一次 reload。
+管理器提供可搜索的 Marketplace 列表、个人 Plugin 开关、当前仓库安装和兼容性详情，并可完成添加、更新、删除和诊断。使用方向键导航、Enter 选择；Plugin 页面用 Space/Enter 切换、Ctrl+S 保存，修改后按 Esc 也会保存并返回。新增或取消安装会在真正写入前要求确认。Git 获取期间显示可取消的 Loader，按 Esc 会中止子进程并清理临时快照。资源变更会暂存到管理流程结束，关闭管理器后最多执行一次 reload。
 
 Marketplace Loader 只提供 `/plugins` 入口；RPC、Print、JSON 等非 TUI 模式不支持管理操作。
 
-添加仓库只需提供 Git URL，加载器会解析并使用远程 `origin/HEAD` 指向的默认分支，不会猜测 `main`、`master` 或 latest 标签。添加只建立经过校验的 commit 快照，不会默认启用 Plugin。启用前还会单独确认，因为 Skill 是可影响模型工具使用的受信任指令。更新沿用已保存的 ref，不再单独询问；更新会先获取和校验候选快照，再显示旧、新 commit 并确认激活，失败或拒绝不会替换当前快照。
+添加仓库只需提供 Git URL，加载器会解析并使用远程 `origin/HEAD` 指向的默认分支，不会猜测 `main`、`master` 或 latest 标签。添加只建立经过校验的 commit 快照，不会默认启用 Plugin。启用或安装前还会单独确认，因为 Skill 是可影响模型工具使用的受信任指令。更新沿用已保存的 ref，不再单独询问；更新会先获取和校验候选快照，再显示旧、新 commit 并确认激活，失败或拒绝不会替换当前快照。
 
 默认状态目录为 `~/.pi/agent/marketplaces/`，可用 `PI_MARKETPLACE_HOME` 覆盖。Git 克隆不初始化 submodule，不运行 npm、Codex、仓库 hooks 或 plugin scripts。
+
+“安装到当前仓库”只在受信任的 Git 仓库中可用。加载器会把选中 Plugin 的完整 Skill 目录原子复制到仓库根的 `.agents/skills/<skill-name>/`，并在 `.pi/marketplace-loader.lock.json` 记录来源、commit 和文件所有权。Pi 与其他支持项目级 Agent Skills 的 Agent 可以直接发现这些 Skill；这不会替各平台注册 Marketplace Plugin、commands、hooks、MCP 或其他非 Skill 能力。加载器拒绝覆盖不在锁文件中登记的同名目录，停用时也只删除自己管理的 Skill。更新 Marketplace 时会同步当前仓库已经安装的 Plugin；其他仓库会在各自打开管理器并更新时同步。
+
+个人和仓库安装可以同时存在。当前仓库已安装的同名 Skill 会遮蔽加载器提供的个人副本，避免 Pi 重复发现。若还通过 Claude、Codex、Kimi 或 Pi 的其他安装方式加载同名 Skill，仍需由用户移除重复入口。项目安装生成的 Skill 与锁文件是否提交到 Git 由仓库自行决定；若不提交，其他机器不会自动恢复这些文件。
 
 不要在同一 Pi 配置中既由本加载器管理某个 Marketplace，又通过 `pi install` 直接安装同一仓库，否则 Pi 可能重复发现 Skill。迁移已有安装时先用 `pi list` 确认 source，再在 shell 中执行 `pi remove <my-skills-source>`。集中模式只安装本 `pi-plugins` 包，然后运行 `/plugins`，在交互式管理器中添加 Marketplace 并启用所需 Plugin。
 

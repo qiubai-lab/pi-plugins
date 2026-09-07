@@ -20,6 +20,8 @@ function fakeContext(): ExtensionCommandContext & { notifications: { message: st
   const notifications: { message: string; level: string }[] = [];
   return {
     mode: "tui",
+    cwd: "/project",
+    isProjectTrusted() { return true; },
     notifications,
     ui: {
       notify(message: string, level: string) { notifications.push({ message, level }); },
@@ -63,7 +65,7 @@ describe("marketplace loader Pi adapter", () => {
     registerMarketplaceLoader(pi.api, { service: service as unknown as MarketplaceService });
     const handler = pi.events.get("resources_discover")!;
     const ctx = fakeContext();
-    await expect(handler({}, ctx)).resolves.toEqual({ skillPaths: ["/skills"] });
+    await expect(handler({ cwd: "/project" }, ctx)).resolves.toEqual({ skillPaths: ["/skills"] });
 
     service.discoverSkillPaths = async () => { throw new Error("状态损坏"); };
     await expect(handler({}, ctx)).resolves.toEqual({ skillPaths: [] });

@@ -10,11 +10,14 @@
 - `package.json`: Pi package resource manifest and npm verification commands.
 - `tsconfig.json`: TypeScript checking contract for extension source and tests.
 - `extensions/osc-notify/index.ts`: OSC Notify Pi extension entrypoint and runtime composition root.
+- `extensions/marketplace-loader/index.ts`: remote marketplace Pi adapter and `/marketplaces` command entrypoint.
+- `extensions/marketplace-loader/service.ts`: source, snapshot, plugin enablement, update, and diagnostic application service.
 - `README.md`: installation, configuration, and operator-facing usage.
 
 ## Module Responsibilities
 
 - `extensions/osc-notify/`: owns terminal notification lifecycle integration, final-response excerpting, protocol selection, safe encoding, and focused tests; does not own terminal emulator notification settings or native OS delivery.
+- `extensions/marketplace-loader/`: owns argument-safe Git snapshots, Pi/Codex catalog validation, atomic selection state, dynamic skill discovery, and focused tests; does not invoke Pi package management or execute marketplace content.
 - `docs/qb-spec/context/`: owns stable architecture and engineering constraints; does not contain task execution history.
 - `docs/qb-spec/specs/`: owns active change scope and acceptance; does not define package discovery behavior.
 

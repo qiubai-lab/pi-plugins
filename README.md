@@ -90,6 +90,47 @@ Qterm 可在「系统设置 → 高级 → 终端通知」中控制接收行为�
 
 首版不封装 tmux/screen passthrough。复用器可能隐藏外层终端身份或过滤 OSC；遇到这种情况应配置复用器透传，或显式选择 `bell`。不要同时发送多个协议作为降级方案，否则 Qterm 等支持多个协议的终端会收到重复提醒。
 
+## Marketplace Loader
+
+`extensions/marketplace-loader` 集中管理远程、同时适配 Pi 与 Codex 的 skill marketplace。Pi 只需安装本仓库；加载器会将受信任的远程仓库保存为私有快照，并按 Codex marketplace 中的 plugin 分组启用 skill。
+
+### 仓库要求
+
+远程仓库必须同时包含：
+
+- 根 `package.json`，且 `pi.skills` 非空；
+- `.agents/plugins/marketplace.json`；
+- 使用仓库内 `local` source 的 plugin 条目；
+- 每个 plugin 的 `.codex-plugin/plugin.json` 和其中声明的 `skills` 目录。
+
+P1 不支持 URL、git-subdir、npm plugin source，也不加载 Codex commands、agents、hooks、MCP、apps 或自动执行 scripts。快照会拒绝路径越界、符号链接、特殊文件、重复 skill 名及过大的文件树。
+
+### 管理命令
+
+```text
+/marketplaces list
+/marketplaces add <git-url> <ref>
+/marketplaces plugins <marketplace>
+/marketplaces enable <plugin>@<marketplace>
+/marketplaces disable <plugin>@<marketplace>
+/marketplaces update <marketplace> [ref]
+/marketplaces remove <marketplace>
+/marketplaces doctor
+```
+
+添加仓库只建立经过校验的 commit 快照，不会默认启用 plugin。启用前还会单独确认，因为 skill 是可影响模型工具使用的受信任指令。更新先获取和校验候选快照，再显示旧、新 commit 并确认激活；失败或拒绝不会替换当前快照。
+
+默认状态目录为 `~/.pi/agent/marketplaces/`，可用 `PI_MARKETPLACE_HOME` 覆盖。Git 克隆不初始化 submodule，不运行 npm、Codex、仓库 hooks 或 plugin scripts。
+
+不要在同一 Pi 配置中既由本加载器管理某个 marketplace，又通过 `pi install` 直接安装同一仓库，否则 Pi 可能重复发现 skill。迁移已有安装时先用 `pi list` 确认 source，再在 shell 中执行 `pi remove <my-skills-source>`。集中模式只安装本 `pi-plugins` 包，然后在 Pi 中运行：
+
+```text
+/marketplaces add <my-skills-git-url> <tag-or-commit>
+/marketplaces enable apple-design-skills@personal-skills
+```
+
+加载器会检测其管理范围内的 skill 名冲突；与其他 Pi package 或用户 skill 的冲突仍由 Pi 自身告警。
+
 ## 开发
 
 需要 Node.js 20 或更新版本：

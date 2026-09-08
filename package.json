@@ -21,7 +21,15 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/*/index.ts"
+      "./extensions/*/index.ts",
+      "./node_modules/pi-web-access/index.ts",
+      "./node_modules/pi-subagents/index.ts"
+    ],
+    "skills": [
+      "./node_modules/pi-subagents/skills"
+    ],
+    "prompts": [
+      "./node_modules/pi-subagents/prompts"
     ]
   },
   "peerDependencies": {
@@ -34,5 +42,13 @@
     "@types/node": "22.19.19",
     "typescript": "5.9.3",
     "vitest": "4.1.9"
-  }
+  },
+  "dependencies": {
+    "pi-subagents": "latest",
+    "pi-web-access": "latest"
+  },
+  "bundledDependencies": [
+    "pi-subagents",
+    "pi-web-access"
+  ]
 }

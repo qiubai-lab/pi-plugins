@@ -34,8 +34,15 @@ pi config
 
 - 默认编辑个人配置 `~/.pi/agent/settings.json`；
 - `pi config -l` 编辑当前项目的 `.pi/settings.json`；
-- 配置界面中可分别控制 `marketplace-loader` 和 `osc-notify`；
+- 配置界面中可分别控制 `marketplace-loader`、`osc-notify`、`pi-web-access` 和 `pi-subagents`；
 - 项目配置会覆盖或收窄继承的个人 package 配置。
+
+本 package 会同时安装并加载以下社区插件：
+
+- [`pi-web-access`](https://www.npmjs.com/package/pi-web-access)：提供网页访问扩展；
+- [`pi-subagents`](https://www.npmjs.com/package/pi-subagents)：提供 subagent 扩展、Skills 和 Prompt Templates。
+
+它们由本仓库作为运行时依赖统一安装，无需再单独执行 `pi install`。本仓库不提交 npm lockfile，并使用 `latest` 标签，以便每次全新安装时解析这两个插件的最新版本。
 
 更新已安装的 package：
 

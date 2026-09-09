@@ -1,226 +1,213 @@
-# 社区插件配置与额外依赖
+# 推荐社区插件安装与依赖
 
-本仓库会在安装时自动安装并加载以下社区插件：
+本仓库仅提供 `marketplace-loader` 和 `osc-notify` 两个自维护扩展，不再捆绑、安装或加载第三方插件。以下社区插件请按各自官方 README/文档推荐的方式单独安装；不要再统一使用 `pi install git:github.com/<owner>/<repository>`。
 
-- [`betterwright`](https://www.npmjs.com/package/betterwright)
-- [`pi-lens`](https://www.npmjs.com/package/pi-lens)
-- [`pi-web-access`](https://www.npmjs.com/package/pi-web-access)
-- [`pi-subagents`](https://www.npmjs.com/package/pi-subagents)
+> 第三方 Pi 扩展会以当前用户权限运行。安装前请审查代码；仅向受信任的插件提供凭据、浏览器 Cookie、网络访问和外部 CLI 权限。
 
-用户无需再分别执行 `pi install npm:<package>`。不过，部分插件的完整功能依赖浏览器、系统命令、语言工具链或服务凭据。本页说明首次安装后需要完成的配置。
+## 快速清单
 
-> 第三方 Pi 扩展会以当前用户权限运行。启用前应审查其来源，并只向受信任的插件提供凭据和网络访问权限。
+| 插件 | 官方来源 | 官方推荐安装命令 | 额外组件/条件 |
+| --- | --- | --- | --- |
+| BetterWright | [BetterWright/betterwright](https://github.com/BetterWright/betterwright) / [betterwright.com](https://betterwright.com/docs/setup) | `pi install npm:betterwright` | Node.js 22+；一次性下载 BetterChromium；可选 MCP SDK |
+| Pi Lens | [apmantza/pi-lens](https://github.com/apmantza/pi-lens) | `pi install npm:pi-lens` | Node.js 22.19+；按语言自动安装/探测分析工具；PowerShell 分析器需手动安装 |
+| Pi Web Access | [ivanreeve/pi-web-access](https://github.com/ivanreeve/pi-web-access) | `pi install npm:pi-web-access` | Pi v0.37.3+；可选搜索 API Key；视频抽帧需 `ffmpeg`/`yt-dlp` |
+| Pi Subagents | [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) | `pi install npm:pi-subagents` | 后台子代理需 npm 版 Pi；研究类内置代理需 `pi-web-access`；外部 profile 需对应 CLI 与认证 |
 
-## 快速检查清单
-
-| 插件 | 基础使用 | 完整功能所需的额外配置 |
-| --- | --- | --- |
-| BetterWright | 需要初始化 | 必须安装 Bun 1.4+ 并下载 BetterChromium，或配置自有浏览器 |
-| Pi Lens | 通常开箱即用 | Node.js 22.19+；语言分析工具会按需自动安装，少数工具需手动安装 |
-| Pi Web Access | 搜索和普通网页抓取可零配置使用 | 视频功能需要 FFmpeg/yt-dlp；部分搜索服务需要 API Key；Linux Curator 建议安装 xdg-utils |
-| Pi Subagents | 原生前台子代理开箱即用 | 后台任务需要 npm 版 Pi；外部 CLI profiles 需要对应 CLI 和登录状态 |
-
-## 1. BetterWright
-
-BetterWright 的 npm 包不包含浏览器。首次使用前必须安装 Bun，并下载一次托管的 BetterChromium。
-
-### 1.1 安装 Bun
-
-BetterWright 要求 Bun 1.4 或更高版本：
+如需只安装到当前项目，可在对应官方命令中加入 `-l`，例如：
 
 ```sh
-bun --version
+pi install -l npm:pi-lens
 ```
 
-如果系统中尚未安装 Bun，请按照 [Bun 官方安装说明](https://bun.sh/docs/installation)安装。例如 Unix 系统可执行：
+## BetterWright
+
+官方来源：[BetterWright/betterwright](https://github.com/BetterWright/betterwright)，安装文档：[betterwright.com/docs/setup](https://betterwright.com/docs/setup)
+
+Pi Coding Agent 官方推荐安装命令：
 
 ```sh
-curl -fsSL https://bun.sh/install | bash
-```
-
-安装后重新打开终端，并再次运行 `bun --version`。
-
-### 1.2 下载浏览器并检查
-
-```sh
+pi install npm:betterwright
 npx -y betterwright setup
-npx -y betterwright doctor
+pi
 ```
 
-`setup` 会将校验过的 BetterChromium 下载到 `~/.betterwright/chromium/`，下载量约为 200 MB。npm 安装本仓库时不会自动执行该下载。
+额外组件分析：
 
-只有当 `doctor` 最终显示 `BetterWright is ready.` 时，浏览器工具才算准备完成。升级 BetterWright 后建议运行：
+- **Node.js 22+**：`betterwright` CLI 和 Pi 扩展均运行在 Node 环境中。先检查：
+
+  ```sh
+  node --version
+  ```
+
+- **BetterChromium 托管浏览器**：npm 安装不会在生命周期脚本中偷偷下载浏览器；必须显式运行一次：
+
+  ```sh
+  npx -y betterwright setup
+  npx -y betterwright doctor
+  ```
+
+  `setup` 会在 macOS arm64、Linux x64、Windows x64 下载校验锁定的 BetterChromium 到 `~/.betterwright/chromium/`。`doctor` 必须以 `BetterWright is ready.` 结束；若出现 `✗`，按输出修复后再使用。
+
+- **升级后的浏览器刷新**：
+
+  ```sh
+  npx -y betterwright update
+  npx -y betterwright doctor
+  ```
+
+- **可选 MCP 集成**：只有把 BetterWright 接入 MCP 客户端时才需要额外安装 `@modelcontextprotocol/sdk`。Pi 原生扩展路径不需要它。
+
+- **安全策略（可选）**：运行不受信任任务时，可限制私网/回环访问和下载权限：
+
+  ```sh
+  export BETTERWRIGHT_BLOCK_PRIVATE_NETWORK=1
+  export BETTERWRIGHT_BLOCK_LOOPBACK=1
+  export BETTERWRIGHT_DOWNLOAD_POLICY=ask
+  ```
+
+  如需访问本地开发服务器，不要启用 loopback 阻断。
+
+> 旧文档中的 Bun 1.4+ 要求不再是 BetterWright 当前官方 Pi 安装路径的前置条件。
+
+## Pi Lens
+
+官方来源：[apmantza/pi-lens](https://github.com/apmantza/pi-lens)
+
+官方推荐安装命令：
 
 ```sh
-npx -y betterwright update
-npx -y betterwright doctor
+pi install npm:pi-lens
 ```
 
-BetterChromium 官方构建主要覆盖 macOS arm64、Linux x64 和 Windows x64。其他操作系统或架构需要配置本地 Chromium、CDP endpoint 或受支持的云浏览器，参见 [BetterWright browser providers](https://betterwright.com/docs/browser-providers)。
-
-### 1.3 可选安全策略
-
-BetterWright 默认可访问公网、私有网络和 loopback。运行不受信任任务时，建议通过其环境变量限制网络范围，例如：
+官方也提供从 Git 安装的替代命令，但常规安装应优先使用 npm 包：
 
 ```sh
-export BETTERWRIGHT_BLOCK_PRIVATE_NETWORK=1
-export BETTERWRIGHT_BLOCK_LOOPBACK=1
-export BETTERWRIGHT_DOWNLOAD_POLICY=ask
+pi install git:github.com/apmantza/pi-lens
 ```
 
-如果需要访问本地开发服务器，不要启用 loopback 阻断。完整选项参见 BetterWright 的 network policy 文档。
+额外组件分析：
 
-## 2. Pi Lens
+- **Node.js 22.19.0+**：与 Pi host 的最低版本一致。检查：
 
-Pi Lens 要求 Node.js 22.19.0 或更高版本：
+  ```sh
+  node --version
+  ```
 
-```sh
-node --version
-```
-
-Pi Lens 会根据当前项目语言和配置按需安装大部分分析工具，无需预先一次性安装，包括 TypeScript Language Server、Pyright、Ruff、Biome、Prettier、ast-grep、ShellCheck、rust-analyzer 等。
-
-需要注意：
-
-- 第一次处理某种语言时可能访问 npm、GitHub Releases、pip、gem 或 Go 工具链；
-- 自动安装是否成功取决于网络、目录权限以及对应语言包管理器是否可用；
-- npm 12 若提示依赖安装脚本未获批准，应先审查提示，再运行：
+- **npm 安装脚本审批**：npm v12 可能要求审批依赖生命周期脚本（例如 `@ast-grep/cli` 的 `postinstall`）。先审查提示，再按需执行：
 
   ```sh
   npm approve-scripts
   ```
 
-- `PSScriptAnalyzer` 当前需要用户手动安装；
-- `gopls`、`ruby-lsp`、`solargraph` 等工具可能需要本机已有 Go、Ruby 等对应语言环境。
+- **自动安装的语言/分析工具**：Pi Lens 会按配置、项目语言或运行流程自动安装大量工具。常见包括 `@biomejs/biome`、`prettier`、`ruff`、`typescript-language-server`、`typescript`、`pyright`、`@ast-grep/cli`、`knip`、`jscpd`、`madge`、`mypy`、`stylelint`、`markdownlint-cli2`、`shellcheck`、`shfmt`、`rust-analyzer`、`golangci-lint`、`hadolint`、`tflint`、`taplo`、`terraform-ls`、HTML/CSS/JSON/YAML/Bash/Svelte/Vue/Prisma/Docker/PHP 等语言服务器。
 
-可在 Pi 中运行以下命令检查运行状态：
+- **需要本机语言环境或包管理器的工具**：`gopls`、`ruby-lsp`、`solargraph` 等会从 `PATH` 探测，或在检测到对应语言时通过 Go/Ruby 等原生包管理器安装；因此可能需要预先准备 Go、Ruby、Python/pip、网络和目录权限。
+
+- **手动安装项**：`psscriptanalyzer`（PowerShell Script Analyzer）官方列为手动安装。
+
+在 Pi 中检查状态：
 
 ```text
 /lens-health
 ```
 
-Pi Lens 的自动安装策略详见其随包提供的 `docs/dependencies.md`。
+## Pi Web Access
 
-## 3. Pi Web Access
+官方来源：[ivanreeve/pi-web-access](https://github.com/ivanreeve/pi-web-access)
 
-普通网页搜索和网页抓取不要求额外系统包。默认可使用零配置的 Exa MCP；使用已登录的 Codex 模型时，也可以复用相应搜索认证。
-
-### 3.1 搜索服务凭据（可选）
-
-Brave、Gemini、Perplexity、Tavily 等其他 provider 需要各自的 API Key。可通过环境变量或 `~/.pi/web-search.json` 配置。若零配置 provider 已满足需求，可以跳过此步骤。
-
-例如：
+官方推荐安装命令：
 
 ```sh
-export BRAVE_API_KEY="..."
-export GEMINI_API_KEY="..."
+pi install npm:pi-web-access
 ```
 
-不要将密钥提交到当前仓库。
+额外组件分析：
 
-### 3.2 视频处理（可选）
+- **Pi v0.37.3+**：低于该版本可能无法加载或使用完整工具集。
 
-- 本地视频帧提取需要 `ffmpeg`（通常同时提供 `ffprobe`）；
-- YouTube 帧提取需要 `ffmpeg` 和 `yt-dlp`；
-- 完整的 Gemini 视频理解通常还需要 `GEMINI_API_KEY`。
+- **搜索 API Key（可选）**：官方说明基础搜索可零配置工作；如需更多 provider 或直接 API 访问，可写入 `~/.pi/web-search.json`：
 
-macOS 示例：
+  ```json
+  {
+    "openaiApiKey": "sk-...",
+    "braveApiKey": "BSA_...",
+    "exaApiKey": "exa-...",
+    "perplexityApiKey": "pplx-...",
+    "geminiApiKey": "AIza..."
+  }
+  ```
+
+  环境变量会覆盖配置文件值，例如：
+
+  ```sh
+  export OPENAI_API_KEY="..."
+  export BRAVE_API_KEY="..."
+  export EXA_API_KEY="..."
+  export GEMINI_API_KEY="..."
+  export PERPLEXITY_API_KEY="..."
+  ```
+
+  不要将密钥提交到仓库。
+
+- **视频抽帧依赖（可选）**：普通网页搜索、URL 抓取、GitHub 仓库克隆、YouTube 文本/转录分析通常不需要额外系统包；只有从本地视频或 YouTube 提取指定帧图片时需要：
+
+  ```sh
+  # macOS
+  brew install ffmpeg yt-dlp
+
+  # Debian/Ubuntu
+  sudo apt update
+  sudo apt install -y ffmpeg yt-dlp
+  ```
+
+  其中本地视频抽帧需要 `ffmpeg`；YouTube 抽帧需要 `ffmpeg` 和 `yt-dlp`。
+
+- **浏览器 Curator（可选）**：Linux 上若需要自动打开交互式搜索 Curator，可安装 `xdg-utils`；缺少它不影响搜索本身。
+
+  ```sh
+  sudo apt install -y xdg-utils
+  ```
+
+- **GitHub 私有仓库/更高限额（可选）**：访问私有 GitHub 仓库、提高 API 限额或获取更完整仓库信息时，建议安装并认证 GitHub CLI：
+
+  ```sh
+  gh auth login
+  ```
+
+## Pi Subagents
+
+官方来源：[nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents)
+
+官方推荐安装命令：
 
 ```sh
-brew install ffmpeg yt-dlp
+pi install npm:pi-subagents
 ```
 
-Debian/Ubuntu 示例：
+额外组件分析：
 
-```sh
-sudo apt update
-sudo apt install -y ffmpeg yt-dlp
-```
+- **后台子代理需要 npm 版 Pi**：后台 children 依赖 npm package 形式安装的 Pi（`@earendil-works/pi-coding-agent`），因为 detached runner 会从该 package 目录导入 Pi 代码。单文件 Pi 可执行程序只能运行前台子代理（`async: false`）。
 
-安装后检查：
+- **内置原生代理本身不需要额外 CLI**：`scout`、`worker`、`reviewer`、`oracle`、`delegate` 等原生子代理复用当前 Pi 模型配置。
 
-```sh
-ffmpeg -version
-yt-dlp --version
-```
+- **研究类代理需要 Pi Web Access**：内置 `researcher` 和 `evidence-auditor` 使用 `web_search`、`fetch_content`、`get_search_content` 和 `source_check`，因此需要额外安装并加载：
 
-### 3.3 Linux Curator 界面（可选）
+  ```sh
+  pi install npm:pi-web-access
+  ```
 
-Linux 上自动在默认浏览器中打开搜索 Curator，需要 `xdg-utils`：
+- **外部 CLI profile 仅在显式选择时需要对应工具和认证**：
 
-```sh
-# Debian/Ubuntu
-sudo apt install -y xdg-utils
+  | Profile | 额外要求 |
+  | --- | --- |
+  | `codex-exec` / `codex-exec-writer` | 已安装并认证的 Codex CLI |
+  | `claude-code` / `claude-code-writer` | 已安装并通过正常本地登录认证的 Claude Code CLI；使用前需信任/审查用户级 Claude Code settings/hooks |
+  | `cursor-agent` / `cursor-agent-writer` | Cursor CLI，以及 `CURSOR_API_KEY` 或已有本地登录；可能还需要完成 Cursor workspace trust |
 
-# Fedora/RHEL
-sudo dnf install -y xdg-utils
+- **分享与可选检查**：分享 session 到 GitHub Gist 时需要已认证的 `gh`。Watchdog 的可选 LSP 检查会使用 `PATH` 或 `node_modules/.bin` 中已有的 `typescript-language-server`，不会主动安装它。
 
-# Arch Linux
-sudo pacman -S xdg-utils
-```
-
-缺少它不会阻止搜索；插件会输出 Curator URL，用户可以手动在浏览器中打开。
-
-### 3.4 GitHub CLI（可选）
-
-公共 GitHub 仓库通常可以通过普通 Git 或 REST fallback 访问。若需要私有仓库、较高 API 限额或完整的 PR checks 信息，建议安装并登录 GitHub CLI：
-
-```sh
-gh auth login
-```
-
-## 4. Pi Subagents
-
-原生 `scout`、`worker`、`reviewer`、`oracle` 等子代理不需要额外安装组件，并默认复用当前 Pi 的模型配置。
-
-### 4.1 后台子代理
-
-后台子代理要求 Pi 以 npm package 形式安装，因为 detached runner 需要从 Pi package 目录导入运行时依赖。单文件 Pi 可执行程序只能运行前台子代理：
-
-```text
-async: false
-```
-
-可在 Pi 中执行以下命令检查环境：
+在 Pi 中检查环境：
 
 ```text
 /subagents-doctor
 ```
-
-### 4.2 外部 CLI profiles（可选）
-
-只有显式选择对应 profile 时才需要安装外部工具：
-
-| Profile | 额外要求 |
-| --- | --- |
-| `codex-exec` / `codex-exec-writer` | 已安装并认证的 Codex CLI |
-| `claude-code` / `claude-code-writer` | 已安装并认证的 Claude Code CLI |
-| `cursor-agent` / `cursor-agent-writer` | Cursor CLI，以及本地登录或 `CURSOR_API_KEY` |
-
-这些外部 CLI 不是原生子代理的必需依赖。插件在列出能力时只检查命令是否存在，真正启动时仍会验证版本、认证和运行条件。
-
-其他可选组件：
-
-- 分享 session 到 GitHub Gist 时需要已认证的 `gh`；
-- Watchdog 的可选 LSP 检查会使用 PATH 或 `node_modules/.bin` 中已有的 `typescript-language-server`，不会主动安装它；
-- researcher 的网页工具依赖 Pi Web Access，本仓库已一并集成，无需另行安装。
-
-## 推荐的首次安装流程
-
-安装本仓库后，建议依次执行：
-
-```sh
-node --version
-bun --version
-npx -y betterwright setup
-npx -y betterwright doctor
-```
-
-随后启动 Pi，并检查：
-
-```text
-/lens-health
-/subagents-doctor
-```
-
-如果需要视频帧提取，再安装并检查 `ffmpeg` 与 `yt-dlp`；如果需要 Linux Curator 自动打开，再安装 `xdg-utils`。API Key、外部 Agent CLI 和 GitHub CLI 均按实际使用场景配置，无需为基础功能全部安装。

@@ -2,7 +2,7 @@
 id: QB-20260910-qb-trace
 type: feature
 tier: strict
-status: draft
+status: archived
 created: 2026-09-10
 updated: 2026-09-10
 supersedes: []
@@ -22,7 +22,8 @@ Spec quality review: **PASS WITH NOTES**. REQ/AC/Delta coverage is closed, failu
 - `extensions/qb-trace/config.ts`: global recording state, atomic updates and live change observation.
 - `extensions/qb-trace/events.ts`: versioned event envelope, correlation and loss-aware serialization.
 - `extensions/qb-trace/collector.ts`: non-blocking queue, batching, retry and shutdown coordination.
-- `extensions/qb-trace/store.ts`: SQLite schema ownership, WAL setup, append transactions and read-only query contract.
+- `extensions/qb-trace/store.ts`: SQLite schema ownership, WAL setup and append transactions.
+- `extensions/qb-trace/query.ts`: future Server-facing read-only Trace Query Service contract.
 - `extensions/qb-trace/diagnostics.ts`: database-independent per-runtime error/gap state and status aggregation.
 - `extensions/qb-trace/cli.ts`: command use cases for on/off/status and the reserved server response.
 - `bin/qb-trace`: thin executable entrypoint.
@@ -33,15 +34,15 @@ Exact file splitting may be adjusted by the architecture-boundary check, but the
 
 ## Tasks
 
-- **TASK-001 [REQ-006, REQ-008, REQ-009, REQ-010, REQ-011, REQ-012; AC-004, AC-005, AC-006]:** Define the versioned Trace envelope, Runtime/Session/correlation identity rules, event-stage vocabulary and loss-aware serializer. Inventory the supported Pi 0.85.1 hooks and explicitly mark API-observable boundaries so streamed deltas and final authoritative records are distinguishable.
-- **TASK-002 [REQ-013, REQ-014, REQ-015, REQ-016, REQ-017; AC-006, AC-007, AC-008]:** Implement the single global SQLite store with WAL, schema/user-version checks, append-only uniqueness constraints, Session/Runtime indexes, short batch transactions and a read-only query interface. Select a SQLite runtime compatible with Pi's effective Node requirement and update the package engine contract if necessary.
-- **TASK-003 [depends: TASK-001, TASK-002] [REQ-018, REQ-019, REQ-020, REQ-021, REQ-022; AC-003, AC-007, AC-009]:** Implement the collector queue with count and byte bounds, non-mutating snapshots, bounded lock retry, batch persistence, two-second shutdown flush, fail-open behavior and whole-event dropping at capacity. Persist error/gap counters outside the Trace database so status remains informative when SQLite is unavailable.
-- **TASK-004 [REQ-001, REQ-002, REQ-004, REQ-005; AC-001, AC-002]:** Implement atomic global on/off configuration and a low-cost live observer that applies changes to all loaded runtimes within two seconds. Define auditable on/off boundaries without requiring the Server or a Pi Slash Command.
-- **TASK-005 [depends: TASK-001, TASK-003, TASK-004] [REQ-006, REQ-007, REQ-008, REQ-010, REQ-011, REQ-012, REQ-022; AC-004, AC-005, AC-006, AC-009]:** Wire the thin Pi extension adapter to the supported lifecycle, provider, message and tool hooks. Preserve callback ordering metadata, correlate parallel tools by call ID, capture full callback-visible payloads without QB Trace truncation/redaction, and ensure handlers never return mutations to Pi.
-- **TASK-006 [depends: TASK-002, TASK-003, TASK-004] [REQ-003, REQ-024, REQ-025, REQ-026; AC-003, AC-011]:** Implement `qb-trace on/off/status`; aggregate sidecar diagnostics with database metadata; make commands independent of Pi and Server processes. Reserve `server` with an explicit nonzero not-implemented result while exposing no placeholder listener.
-- **TASK-007 [depends: TASK-006] [REQ-023, REQ-024; AC-010]:** Add the executable and guarded Linux/macOS installation script. Resolve the package-owned source deterministically, create `~/.local/bin` when safe, use a symbolic link, verify ownership on repeat runs, reject foreign targets and report PATH remediation.
-- **TASK-008 [depends: TASK-001, TASK-002, TASK-003, TASK-004, TASK-005, TASK-006] [REQ-001, REQ-002, REQ-006, REQ-007, REQ-009, REQ-010, REQ-011, REQ-013, REQ-014, REQ-018, REQ-019, REQ-020, REQ-021; AC-001, AC-002, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009]:** Add deterministic unit/integration harnesses for event capture, config propagation, concurrent processes, parallel tools, lifecycle replacement, schema incompatibility, storage faults, queue pressure and bounded shutdown. Use synthetic credentials and payload markers only.
-- **TASK-009 [depends: TASK-006, TASK-007] [REQ-017, REQ-023, REQ-025, REQ-027, REQ-028; AC-010, AC-011, AC-012]:** Document installation, commands, locations, unlimited growth, full sensitive capture, observable-data limitations, Linux/macOS scope, fail-open gaps, reserved Server behavior and safe rollback. Update package manifest and Directory Map for the new extension/CLI boundary.
+- **TASK-001 ✅ [REQ-006, REQ-008, REQ-009, REQ-010, REQ-011, REQ-012; AC-004, AC-005, AC-006]:** Define the versioned Trace envelope, Runtime/Session/correlation identity rules, event-stage vocabulary and loss-aware serializer. Inventory the supported Pi 0.85.1 hooks and explicitly mark API-observable boundaries so streamed deltas and final authoritative records are distinguishable.
+- **TASK-002 ✅ [REQ-013, REQ-014, REQ-015, REQ-016, REQ-017; AC-006, AC-007, AC-008]:** Implement the single global SQLite store with WAL, schema/user-version checks, append-only uniqueness constraints, Session/Runtime indexes, short batch transactions and a read-only query interface. Select a SQLite runtime compatible with Pi's effective Node requirement and update the package engine contract if necessary.
+- **TASK-003 ✅ [depends: TASK-001, TASK-002] [REQ-018, REQ-019, REQ-020, REQ-021, REQ-022; AC-003, AC-007, AC-009]:** Implement the collector queue with count and byte bounds, non-mutating snapshots, bounded lock retry, batch persistence, two-second shutdown flush, fail-open behavior and whole-event dropping at capacity. Persist error/gap counters outside the Trace database so status remains informative when SQLite is unavailable.
+- **TASK-004 ✅ [REQ-001, REQ-002, REQ-004, REQ-005; AC-001, AC-002]:** Implement atomic global on/off configuration and a low-cost live observer that applies changes to all loaded runtimes within two seconds. Define auditable on/off boundaries without requiring the Server or a Pi Slash Command.
+- **TASK-005 ✅ [depends: TASK-001, TASK-003, TASK-004] [REQ-006, REQ-007, REQ-008, REQ-010, REQ-011, REQ-012, REQ-022; AC-004, AC-005, AC-006, AC-009]:** Wire the thin Pi extension adapter to the supported lifecycle, provider, message and tool hooks. Preserve callback ordering metadata, correlate parallel tools by call ID, capture full callback-visible payloads without QB Trace truncation/redaction, and ensure handlers never return mutations to Pi.
+- **TASK-006 ✅ [depends: TASK-002, TASK-003, TASK-004] [REQ-003, REQ-024, REQ-025, REQ-026; AC-003, AC-011]:** Implement `qb-trace on/off/status`; aggregate sidecar diagnostics with database metadata; make commands independent of Pi and Server processes. Reserve `server` with an explicit nonzero not-implemented result while exposing no placeholder listener.
+- **TASK-007 ✅ [depends: TASK-006] [REQ-023, REQ-024; AC-010]:** Add the executable and guarded Linux/macOS installation script. Resolve the package-owned source deterministically, create `~/.local/bin` when safe, use a symbolic link, verify ownership on repeat runs, reject foreign targets and report PATH remediation.
+- **TASK-008 ✅ [depends: TASK-001, TASK-002, TASK-003, TASK-004, TASK-005, TASK-006] [REQ-001, REQ-002, REQ-006, REQ-007, REQ-009, REQ-010, REQ-011, REQ-013, REQ-014, REQ-018, REQ-019, REQ-020, REQ-021; AC-001, AC-002, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009]:** Add deterministic unit/integration harnesses for event capture, config propagation, concurrent processes, parallel tools, lifecycle replacement, schema incompatibility, storage faults, queue pressure and bounded shutdown. Use synthetic credentials and payload markers only.
+- **TASK-009 ✅ [depends: TASK-006, TASK-007] [REQ-017, REQ-023, REQ-025, REQ-027, REQ-028; AC-010, AC-011, AC-012]:** Document installation, commands, locations, unlimited growth, full sensitive capture, observable-data limitations, Linux/macOS scope, fail-open gaps, reserved Server behavior and safe rollback. Update package manifest and Directory Map for the new extension/CLI boundary.
 
 ## Architecture and critical-behavior gates
 

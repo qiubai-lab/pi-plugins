@@ -2,7 +2,7 @@
 id: QB-20260910-qb-trace
 type: feature
 tier: strict
-status: draft
+status: archived
 created: 2026-09-10
 updated: 2026-09-10
 supersedes: []
@@ -160,6 +160,34 @@ supersedes: []
 - **扩展顺序影响最终值：** Observer 不修改事件，但后加载扩展仍可能修改 provider/tool middleware 数据；Trace 必须记录观察点和事件阶段，不宣称一定是后续插件处理后的最终值。
 - **CLI 链接漂移或 PATH 缺失：** 安装脚本幂等校验目标所有权，并对 PATH 给出可操作提示。
 - **正常退出仍可能丢失缓冲：** 使用有界 shutdown flush；异常终止和存储失败通过 gap/error 状态诚实呈现。
+
+## Verification Evidence
+
+- **VER-001 / AC-001:** Multi-runtime adapter integration enabled one global home without a Server, wrote two Session/Runtime identities to one database, and live configuration polling applied without reload within the two-second contract.
+- **VER-002 / AC-002:** The live-off integration used the real CLI control path, confirmed post-propagation marker events were absent, retained prior rows, and persisted the off control boundary.
+- **VER-003 / AC-003:** CLI tests covered on, off, status, absent/corrupt databases, size/schema/event reporting, external error/drop diagnostics, and truthful exit codes.
+- **VER-004 / AC-004:** A controlled Pi adapter fixture persisted raw thinking/text updates, final model output, successful and failed tool lifecycles, inputs, results and terminal status markers.
+- **VER-005 / AC-005:** Provider fixtures preserved synthetic Authorization, system prompt, request payload and tool schema markers without QB Trace redaction; documentation and event vocabulary keep unavailable response bodies/internal reasoning outside the captured contract.
+- **VER-006 / AC-006:** Event/store tests proved unique runtime-sequence IDs, monotonic sequencing, call-ID linkage, append idempotency, separate Runtime identities and append-only rows across lifecycle fixtures.
+- **VER-007 / AC-007:** Three concurrent Node writer processes committed 75 events through one WAL database while a read-only observer remained open; all rows were queryable after writer exit.
+- **VER-008 / AC-008:** Clean initialization and compatible reopen passed; a database marked schema 99 was refused and remained byte-for-byte unchanged.
+- **VER-009 / AC-009:** Fault tests covered write failure, malformed database, bounded retry, byte/count queue limits, whole-event drop, bounded shutdown, external diagnostics and non-mutation of observed headers.
+- **VER-010 / AC-010:** The isolated HOME/PATH installation harness passed first install, idempotent repeat, foreign-target refusal and direct standalone execution. `sh -n` passed for both POSIX scripts; the current Linux host executed the smoke path, while macOS compatibility is based on the same POSIX-only script contract rather than a separate macOS runner.
+- **VER-011 / AC-011:** `qb-trace server` returned the reserved not-implemented message and exit code 2; source inspection found no HTTP listener or Server dependency, and `query.ts` exposes the read-only future Server boundary.
+- **VER-012 / AC-012:** README documents installation, commands, sensitive full capture, observation limits, unlimited growth, fail-open gaps, platform scope, rollback semantics and the non-operational V1 Server.
+- **VER-013 / all AC:** `npm test` passed 101 tests in 16 files; `npm run typecheck`, `sh -n bin/qb-trace scripts/install-qb-trace-cli.sh`, `git diff --check`, standalone CLI smoke, and `pi -ne -e . --osc-notify-protocol off --list-models` all passed on the final implementation state.
+
+## Architecture and behavior-protection result
+
+- Boundary check passed: `index.ts` is the Pi adapter; configuration, envelope/correlation, collector, SQLite store, external diagnostics, read-only query and CLI use cases have one-way local dependencies; `bin/` and installation script stay thin and no sibling plugin private import was introduced.
+- Critical behavior is protected by focused tests for global switching, full sensitive payload retention, non-mutation, concurrent WAL writes, schema refusal, fail-open loss reporting, bounded shutdown and guarded CLI installation.
+- Directory structure changes are recorded in `docs/qb-spec/DIRECTORY_MAP.md`.
+
+## Residual risks
+
+- A native macOS execution runner was not available in this environment; scripts deliberately use the tested POSIX subset and avoid GNU-only flags, but the first real macOS installation remains a release smoke check.
+- Abrupt process termination can lose queued events without updating diagnostics; V1 guarantees visible gaps only for failures the process can observe.
+- Full streaming snapshots and the absence of retention can grow the database rapidly, as explicitly accepted for V1.
 
 ## Compatibility and rollback
 

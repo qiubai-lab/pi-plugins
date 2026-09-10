@@ -34,7 +34,7 @@ pi config
 
 - 默认编辑个人配置 `~/.pi/agent/settings.json`；
 - `pi config -l` 编辑当前项目的 `.pi/settings.json`；
-- 配置界面中可分别控制 `marketplace-loader`、`osc-notify`、`betterwright`、`pi-lens`、`pi-web-access` 和 `pi-subagents`；
+- 配置界面中可分别控制 `marketplace-loader`、`osc-notify`、`qb-trace`、`betterwright`、`pi-lens`、`pi-web-access` 和 `pi-subagents`；
 - 项目配置会覆盖或收窄继承的个人 package 配置。
 
 本 package 会同时安装并加载以下社区插件：
@@ -161,6 +161,57 @@ Qterm 可在「系统设置 → 高级 → 终端通知」中控制接收行为�
 
 首版不封装 tmux/screen passthrough。复用器可能隐藏外层终端身份或过滤 OSC；遇到这种情况应配置复用器透传，或显式选择 `bell`。不要同时发送多个协议作为降级方案，否则 Qterm 等支持多个协议的终端会收到重复提醒。
 
+## QB Trace
+
+`extensions/qb-trace` 是默认关闭的本地全量执行追踪采集器。它在开启后监听 Pi 的 Session、Agent、Turn、Provider、消息、thinking、工具、compaction 和 tree 等公共扩展事件，并把各 Pi 进程观察到的完整 payload 追加到同一个 SQLite WAL 数据库。采集不依赖 Web Server，也不注册 Pi 会话内 Slash Command。
+
+### 安装独立命令
+
+Pi package 安装不会自动把 package 的可执行文件加入 `PATH`。进入本 package 的实际安装目录（可先用 `pi list` 查看）后执行一次：
+
+```sh
+npm run install:qb-trace
+```
+
+脚本只会创建 package 自己拥有的链接：
+
+```text
+~/.local/bin/qb-trace -> <package-root>/bin/qb-trace
+```
+
+如果目标已被其他文件占用，脚本会拒绝覆盖。如果 `~/.local/bin` 不在 `PATH`，请按脚本提示加入。V1 支持 Linux 和 macOS，需要 Node.js 22.19 或更新版本。
+
+### 启停和状态
+
+```sh
+qb-trace on       # 持久化开启所有已加载 qb-trace 扩展的 Pi 实例
+qb-trace off      # 停止新增执行事件，不删除历史数据
+qb-trace status   # 查看路径、schema、大小、事件数、错误和数据缺口
+qb-trace server   # V1 保留名称但尚未实现，返回非零退出码
+```
+
+运行中的 Pi 实例会在两秒内感知 on/off，无需 `/reload`。如果通过 `pi config` 禁用了 `qb-trace` 扩展，全局 `on` 不会强制加载它。
+
+默认目录为 `~/.pi/agent/qb-trace/`：
+
+```text
+config.json       全局记录开关
+traces.sqlite     唯一权威 Trace 数据库
+diagnostics/      SQLite 不可用时仍可读取的逐 Runtime 错误/丢失计数
+```
+
+设置 `QB_TRACE_HOME` 可以覆盖该目录；`PI_CODING_AGENT_DIR` 仍控制默认 Pi agent 目录。
+
+### 重要安全与容量说明
+
+QB Trace 当前**不脱敏、不移除认证头、不摘要且不主动截断事件 payload**。数据库可能包含 API 密钥、Authorization header、系统提示词、源码、个人数据、图片、thinking 和完整工具输入输出。不要在未经检查时共享数据库，并按高敏感文件保护整个目录。
+
+“全量”仅指 Pi 公共扩展回调实际暴露给采集器的数据：Provider 未公开的内部 Chain of Thought、原始 HTTP/SSE response body，以及在事件产生前已被 Pi、工具或 Provider 截断/隐藏的内容无法恢复。其他后加载扩展仍可能在 QB Trace 的观察点之后修改 middleware 数据。
+
+V1 不自动删除、轮转、压缩或限制已提交数据，数据库会持续增长。SQLite 锁定、磁盘满、损坏、队列饱和等错误采用 fail-open：Pi 继续运行，最多重试后允许丢失整个 Trace 事件，`qb-trace status` 会显示可检测的错误和缺口。`qb-trace off`、正常 Session shutdown 和正常退出会尝试在最多两秒内刷新队列，但不阻止 Pi 退出。
+
+未来的 `qb-trace server` 将使用只读查询边界访问同一数据库；Server 是否运行不会改变采集开关或写入路径。
+
 ## Marketplace Loader
 
 `extensions/marketplace-loader` 集中管理远程、同时适配 Pi 与 Codex 的 skill marketplace。Pi 只需安装本仓库；加载器会将受信任的远程仓库保存为私有快照，并按 Codex marketplace 中的 plugin 分组启用 skill。
@@ -202,7 +253,7 @@ Marketplace Loader 只提供 `/plugins` 入口；RPC、Print、JSON 等非 TUI �
 
 ## 开发
 
-需要 Node.js 20 或更新版本：
+需要 Node.js 22.19 或更新版本：
 
 ```sh
 npm ci

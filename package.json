@@ -1,6 +1,6 @@
 {
   "name": "@qiubai-lab/pi-plugins",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Private Pi extension collection",
   "type": "module",
@@ -13,9 +13,13 @@
     "pi-package"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "qb-trace": "bin/qb-trace"
   },
   "scripts": {
+    "install:qb-trace": "./scripts/install-qb-trace-cli.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

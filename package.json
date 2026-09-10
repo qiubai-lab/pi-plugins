@@ -15,11 +15,7 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "bin": {
-    "qb-trace": "bin/qb-trace"
-  },
   "scripts": {
-    "install:qb-trace": "./scripts/install-qb-trace-cli.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
